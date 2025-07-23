@@ -1,0 +1,8 @@
+backend/.env
+backend/.venv
+backend/__pycache__
+
+frontend/.idea
+frontend/dist
+frontend/.env
+frontend/node_modules

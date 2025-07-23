@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+dist/
+build/
+.env
+
+# Virtualenv
+.server/
+.server
+.venv
+.venv/
+
+# VSCode
+.vscode/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+*.pid
+*.db
+*.sqlite3

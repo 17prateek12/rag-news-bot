@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: fastapi-app
+    env: docker
+    dockerfilePath: Dockerfile
+    buildCommand: ""
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port 8000"
+    autoDeploy: true
+    envVars:
+      - key: JINA_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: POSTGRES_URL
+        sync: false
+
+  - type: redis
+    name: redis
+    env: docker
+    image: "redis:latest"
+    ports:
+      - "6379"
+
+  - type: postgres
+    name: postgres
+    env: docker
+    image: "postgres:latest"
+    envVars:
+      - key: POSTGRES_USER
+        value: "postgres"
+      - key: POSTGRES_PASSWORD
+        value: "prateek@1712"
+      - key: POSTGRES_DB
+        value: "ragbot"
+    ports:
+      - "5432"
+
+  - type: docker
+    name: qdrant
+    env: docker
+    image: "qdrant/qdrant:latest"
+    ports:
+      - "6333"
