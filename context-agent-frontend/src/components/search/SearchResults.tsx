@@ -27,7 +27,7 @@ export function SearchResults({ query, results, loading, error }: SearchResultsP
           <a key={`${hit.article_id}-${hit.url}`} className="search-hit" href={hit.url} target="_blank" rel="noreferrer">
             <div className="search-hit-meta">
               <span className="badge">{hit.source}</span>
-              {hit.categories.slice(0, 2).map((cat) => (
+              {hit.categories.map((cat) => (
                 <span key={cat} className="badge badge-soft">
                   {cat}
                 </span>

@@ -664,6 +664,13 @@ input {
   font-size: 0.9rem;
 }
 
+.chat-bubble .chat-sources {
+  padding: 8px 0 0;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+
 .chat-sources ul {
   margin: 8px 0 0;
   padding-left: 18px;

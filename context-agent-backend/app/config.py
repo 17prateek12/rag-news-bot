@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     rrf_k: int = 60
     context_chunk_limit: int = 8
     background_search_limit: int = 4
+    semantic_similarity_threshold: float = 0.65
+    bm25_relevance_threshold: float = 0.05
 
     # Reranker (cross-encoder between retrieval and generation)
     reranker_enabled: bool = True

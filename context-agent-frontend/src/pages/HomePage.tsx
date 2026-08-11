@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Article, Category, SearchHit } from '../api/types'
@@ -21,13 +21,25 @@ export function HomePage() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      try {
+        const cats = await api.listCategories()
+        if (!cancelled) setCategories(cats)
+      } catch (err) {
+        console.error('Failed to list categories', err)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
       setLoading(true)
       try {
-        const [cats, arts] = await Promise.all([api.listCategories(), api.listArticles(100)])
-        if (!cancelled) {
-          setCategories(cats)
-          setArticles(arts)
-        }
+        const res = await api.listArticles(1, 'all', selectedCategory || undefined)
+        if (!cancelled) setArticles(res.articles)
       } catch {
         if (!cancelled) setArticles([])
       } finally {
@@ -37,7 +49,7 @@ export function HomePage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [selectedCategory])
 
   useEffect(() => {
     if (!searchQuery) {
@@ -50,7 +62,7 @@ export function HomePage() {
       setSearchLoading(true)
       setSearchError('')
       try {
-        const res = await api.hybridSearch(searchQuery, 8)
+        const res = await api.bm25Search(searchQuery, 12)
         if (!cancelled) setSearchResults(res.results)
       } catch (err) {
         if (!cancelled) {
@@ -65,14 +77,6 @@ export function HomePage() {
       cancelled = true
     }
   }, [searchQuery])
-
-  const filteredArticles = useMemo(() => {
-    if (!selectedCategory) return articles
-    const key = selectedCategory.toLowerCase()
-    return articles.filter((article) =>
-      article.categories.some((cat) => cat.toLowerCase() === key),
-    )
-  }, [articles, selectedCategory])
 
   return (
     <div className="page home-page">
@@ -102,7 +106,7 @@ export function HomePage() {
             <div className="empty-state">Loading articles…</div>
           ) : (
             <ArticleGrid
-              articles={filteredArticles}
+              articles={articles}
               emptyMessage={
                 selectedCategory
                   ? `No articles in “${selectedCategory}” right now.`

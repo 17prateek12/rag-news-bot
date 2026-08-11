@@ -52,17 +52,30 @@ export function ChatPage() {
   }, [user])
 
   useEffect(() => {
+    if (sessionId) {
+      localStorage.setItem('last_chat_session_id', sessionId)
+    }
+  }, [sessionId])
+
+  useEffect(() => {
     if (!user) return
     ;(async () => {
       setLoadingSessions(true)
       try {
         const data = await api.listChatSessions()
         setSessions(data)
-        if (!sessionId && data[0]) navigate(`/chat/${data[0].id}`, { replace: true })
-        if (!sessionId && !data.length) {
-          const created = await api.createChatSession()
-          setSessions([created])
-          navigate(`/chat/${created.id}`, { replace: true })
+        if (!sessionId) {
+          const lastId = localStorage.getItem('last_chat_session_id')
+          const lastExists = lastId && data.some((s) => s.id === lastId)
+          if (lastExists) {
+            navigate(`/chat/${lastId}`, { replace: true })
+          } else if (data[0]) {
+            navigate(`/chat/${data[0].id}`, { replace: true })
+          } else {
+            const created = await api.createChatSession()
+            setSessions([created])
+            navigate(`/chat/${created.id}`, { replace: true })
+          }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load sessions')
@@ -120,15 +133,27 @@ export function ChatPage() {
     setInput('')
     setSending(true)
     setError('')
+    const tempUserMsg: ChatMessage = {
+      id: 'temp-' + Date.now(),
+      role: 'user',
+      text: text,
+      created_at: new Date().toISOString(),
+    }
+    setMessages((prev) => [...prev, tempUserMsg])
     try {
       const res = await api.sendChatMessage(sessionId, text)
-      setMessages((prev) => [...prev, res.user_message, res.assistant_message])
+      setMessages((prev) => [
+        ...prev.filter((m) => m.id !== tempUserMsg.id),
+        res.user_message,
+        res.assistant_message,
+      ])
       setLastSources(res.sources)
       setSessions((prev) =>
         prev.map((s) => (s.id === sessionId ? { ...s, title: text.slice(0, 80) || s.title } : s)),
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send message')
+      setMessages((prev) => prev.filter((m) => m.id !== tempUserMsg.id))
       setInput(text)
     } finally {
       setSending(false)
@@ -143,14 +168,26 @@ export function ChatPage() {
     }
     setSending(true)
     setError('')
+    const tempUserMsg: ChatMessage = {
+      id: 'temp-' + Date.now(),
+      role: 'user',
+      text: '🎤 Voice message...',
+      created_at: new Date().toISOString(),
+    }
+    setMessages((prev) => [...prev, tempUserMsg])
     try {
       const res = await api.sendVoiceMessage(sessionId, blob, 'recording.webm')
       consumeVoice(user.id)
       setVoiceRemaining(getVoiceRemaining(user.id))
-      setMessages((prev) => [...prev, res.user_message, res.assistant_message])
+      setMessages((prev) => [
+        ...prev.filter((m) => m.id !== tempUserMsg.id),
+        res.user_message,
+        res.assistant_message,
+      ])
       setLastSources(res.sources)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Voice message failed')
+      setMessages((prev) => prev.filter((m) => m.id !== tempUserMsg.id))
     } finally {
       setSending(false)
     }
@@ -244,6 +281,9 @@ export function ChatPage() {
             <div key={message.id} className={`chat-bubble ${message.role}`}>
               <div className="chat-bubble-label">{message.role === 'user' ? 'You' : 'Agent'}</div>
               <div className="chat-bubble-text">{message.text}</div>
+              {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
+                <SourcesList sources={message.sources} />
+              )}
             </div>
           ))}
           {sending && (
@@ -254,7 +294,6 @@ export function ChatPage() {
           <div ref={messagesEndRef} />
         </div>
 
-        {lastSources.length > 0 && <SourcesList sources={lastSources} />}
         {error && <p className="error-text chat-error">{error}</p>}
 
         <form className="chat-input-bar" onSubmit={sendText}>

@@ -6,9 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.database import get_db
+from app.repositories.chunk_repository import ChunkRepository
 from app.repositories.embedding_service import embedding_service
 from app.repositories.qdrant_repo import qdrant_repository
 from app.schemas.search import HybridSearchResponse, SearchHit
+from app.services.cache_service import cache_service
 from app.services.hybrid_search_service import HybridSearchService
 from app.services.reranker_service import reranker_service
 from app.services.search_relevance import filter_hits_by_topic
@@ -58,4 +60,39 @@ async def hybrid_search(
         semantic_count=payload["semantic_count"],
         bm25_count=payload["bm25_count"],
         results=[SearchHit(**hit) for hit in results],
+    )
+
+
+@router.get("/bm25", response_model=HybridSearchResponse)
+async def bm25_search(
+    q: str = Query(min_length=1),
+    limit: int = Query(default=6, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+):
+    logger.info("BM25 search query=%r limit=%s", q, limit)
+    cached = await asyncio.to_thread(cache_service.get_bm25_search, q, limit)
+    if cached is not None:
+        return HybridSearchResponse(
+            query=q,
+            limit=limit,
+            semantic_count=0,
+            bm25_count=cached["bm25_count"],
+            results=[SearchHit(**hit) for hit in cached["results"]],
+        )
+
+    repo = ChunkRepository(db)
+    hits = await repo.search_bm25(q, limit)
+
+    payload = {
+        "results": hits,
+        "bm25_count": len(hits),
+    }
+    await asyncio.to_thread(cache_service.set_bm25_search, q, limit, payload)
+
+    return HybridSearchResponse(
+        query=q,
+        limit=limit,
+        semantic_count=0,
+        bm25_count=len(hits),
+        results=[SearchHit(**hit) for hit in hits],
     )

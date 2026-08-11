@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Menu, Moon, Search, Sun } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
@@ -14,6 +14,20 @@ export function Navbar({ onMenuClick, onSearch, searchQuery = '' }: NavbarProps)
   const { user, openAuth, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const [query, setQuery] = useState(searchQuery)
+
+  useEffect(() => {
+    setQuery(searchQuery)
+  }, [searchQuery])
+
+  useEffect(() => {
+    if (query.trim() === searchQuery.trim()) return
+
+    const delay = setTimeout(() => {
+      onSearch(query.trim())
+    }, 400)
+
+    return () => clearTimeout(delay)
+  }, [query, searchQuery, onSearch])
 
   const submit = (e: FormEvent) => {
     e.preventDefault()

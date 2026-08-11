@@ -18,7 +18,7 @@ export function ArticleCard({ article }: ArticleCardProps) {
       <div className="article-card-body">
         <div className="article-card-meta">
           <span className="badge">{article.source}</span>
-          {article.categories.slice(0, 2).map((cat) => (
+          {article.categories.map((cat) => (
             <span key={cat} className="badge badge-soft">
               {cat}
             </span>

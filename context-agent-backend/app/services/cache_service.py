@@ -95,6 +95,23 @@ class CacheService:
             settings.cache_search_ttl_seconds,
         )
 
+    def bm25_search_key(self, query: str, limit: int) -> str:
+        version = self._get_search_version()
+        return f"search:bm25:{version}:{query_fingerprint(query)}:{limit}"
+
+    def get_bm25_search(self, query: str, limit: int) -> dict[str, Any] | None:
+        payload = self._get_json(self.bm25_search_key(query, limit))
+        if payload is not None:
+            logger.debug("BM25 search cache hit query=%r limit=%s", query, limit)
+        return payload
+
+    def set_bm25_search(self, query: str, limit: int, payload: dict[str, Any]) -> None:
+        self._set_json(
+            self.bm25_search_key(query, limit),
+            payload,
+            600,  # 10-minute retention
+        )
+
     def rag_retrieval_key(self, query: str, intent: str, limit: int) -> str:
         version = self._get_search_version()
         return f"rag:retrieval:{version}:{query_fingerprint(query)}:{intent}:{limit}"

@@ -37,6 +37,11 @@ async def ensure_singleton_admin() -> None:
 
 
 async def run_startup() -> None:
+    # Security Validation: Fail startup if default JWT secret is left unchanged
+    if settings.jwt_secret == "change-me-jwt-secret":
+        logger.critical("SECURITY ERROR: Default jwt_secret detected. Startup aborted.")
+        raise ValueError("Default JWT secret must be changed in the config/.env file.")
+
     try:
         logger.info("=== Startup begin ===")
         logger.info("Step 1/4: Running database migrations")

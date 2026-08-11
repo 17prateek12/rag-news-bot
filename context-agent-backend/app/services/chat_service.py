@@ -80,7 +80,26 @@ class ChatService:
             len(history),
         )
 
-        rag = await self._rag.query(query, limit=limit, history=history, track_trending=track_trending)
+        prior_sources = []
+        for msg in chat_session.messages:
+            if msg.role == "assistant" and msg.sources:
+                for src in msg.sources:
+                    prior_sources.append({
+                        "title": src.get("title"),
+                        "source": src.get("source"),
+                        "url": src.get("url"),
+                        "publish_date": src.get("publish_date"),
+                        "chunk": src.get("excerpt"),
+                        "from_prior_turn": True,
+                    })
+
+        rag = await self._rag.query(
+            query,
+            limit=limit,
+            history=history,
+            prior_sources=prior_sources,
+            track_trending=track_trending,
+        )
 
         user_message = await self._chat_repo.add_message(
             session_id,
@@ -107,6 +126,95 @@ class ChatService:
             rag=rag,
             input_mode="text",
         )
+
+    async def send_message_stream(
+        self,
+        user: User,
+        session_id: UUID,
+        query: str,
+        *,
+        limit: int = 6,
+        track_trending: bool = True,
+    ):
+        chat_session = await self._chat_repo.get_session_with_messages(
+            session_id,
+            user.id,
+            message_limit=MAX_HISTORY_TURNS,
+        )
+        if not chat_session:
+            raise NotFoundError("Chat session not found", details={"session_id": str(session_id)})
+
+        is_first_message = len(chat_session.messages) == 0
+        history = self._history_from_messages(chat_session.messages)
+        logger.info(
+            "Chat send_stream session_id=%s user_id=%s history_turns=%s",
+            session_id,
+            user.id,
+            len(history),
+        )
+
+        user_message = await self._chat_repo.add_message(
+            session_id,
+            role="user",
+            text=query,
+            user_id=user.id,
+        )
+
+        user_msg_read = self._to_message_read(user_message)
+        yield f"data: {orjson.dumps({'type': 'user_message', 'message': user_msg_read.model_dump(mode='json')}).decode('utf-8')}\n\n"
+
+        prior_sources = []
+        for msg in chat_session.messages:
+            if msg.role == "assistant" and msg.sources:
+                for src in msg.sources:
+                    prior_sources.append({
+                        "title": src.get("title"),
+                        "source": src.get("source"),
+                        "url": src.get("url"),
+                        "publish_date": src.get("publish_date"),
+                        "chunk": src.get("excerpt"),
+                        "from_prior_turn": True,
+                    })
+
+        full_text = []
+        rag_sources = []
+        async for sse_chunk in self._rag.query_stream(
+            query,
+            limit=limit,
+            history=history,
+            prior_sources=prior_sources,
+            track_trending=track_trending,
+        ):
+            if sse_chunk.startswith("data: "):
+                raw_data = sse_chunk[6:].strip()
+                if raw_data != "[DONE]":
+                    try:
+                        parsed = orjson.loads(raw_data)
+                        if parsed.get("type") == "token":
+                            full_text.append(parsed.get("text", ""))
+                        elif parsed.get("type") == "metadata":
+                            from app.schemas.agent import SourceCitation
+                            rag_sources = [SourceCitation(**s) for s in parsed.get("sources", [])]
+                    except Exception:
+                        pass
+            yield sse_chunk
+
+        answer_text = "".join(full_text)
+        import re
+        cited_indices = {int(m) for m in re.findall(r"\[(\d+)\]", answer_text)}
+        filtered_sources = [s for s in rag_sources if s.index in cited_indices]
+
+        assistant_message = await self._chat_repo.add_message(
+            session_id,
+            role="assistant",
+            text=answer_text,
+            sources=self._sources_snapshot(filtered_sources),
+            user_id=user.id,
+        )
+
+        if is_first_message and chat_session.title == DEFAULT_SESSION_TITLE:
+            chat_session.title = query.strip()[:80] or DEFAULT_SESSION_TITLE
+            await self._session.commit()
 
     async def send_voice_message(
         self,

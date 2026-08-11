@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -82,6 +83,25 @@ async def send_message(
         session_id,
         payload.query,
         limit=payload.limit,
+    )
+
+
+@router.post("/sessions/{session_id}/messages/stream")
+async def send_message_stream(
+    session_id: UUID,
+    payload: ChatSendRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = ChatService(db)
+    return StreamingResponse(
+        service.send_message_stream(
+            current_user,
+            session_id,
+            payload.query,
+            limit=payload.limit,
+        ),
+        media_type="text/event-stream",
     )
 
 

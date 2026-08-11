@@ -1,6 +1,7 @@
 import type {
   ApiError,
   Article,
+  PaginatedArticlesResponse,
   AuthResponse,
   Category,
   ChatMessage,
@@ -58,7 +59,14 @@ export const api = {
   health: () => request<{ status: string }>('/health'),
 
   listCategories: () => request<Category[]>('/categories'),
-  listArticles: (limit = 100) => request<Article[]>(`/articles?limit=${limit}`),
+  listArticles: (pageNo?: number, limit?: number | 'all', category?: string) => {
+    const params = new URLSearchParams()
+    if (pageNo !== undefined) params.append('pageNo', String(pageNo))
+    if (limit !== undefined) params.append('limit', String(limit))
+    if (category) params.append('category', category)
+    const qs = params.toString()
+    return request<PaginatedArticlesResponse>(qs ? `/articles?${qs}` : '/articles')
+  },
 
   register: (email: string, password: string) =>
     request<AuthResponse>('/auth/register', {
@@ -77,6 +85,11 @@ export const api = {
   hybridSearch: (q: string, limit = 8, topicMatch = false) =>
     request<HybridSearchResponse>(
       `/search/hybrid?q=${encodeURIComponent(q)}&limit=${limit}&rerank=true&topic_match=${topicMatch}`,
+    ),
+
+  bm25Search: (q: string, limit = 12) =>
+    request<HybridSearchResponse>(
+      `/search/bm25?q=${encodeURIComponent(q)}&limit=${limit}`,
     ),
 
   getTrending: (limit = 15) => request<TrendingResponse>(`/trending?limit=${limit}`),

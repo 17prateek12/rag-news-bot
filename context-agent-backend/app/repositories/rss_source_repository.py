@@ -11,7 +11,10 @@ class RssSourceRepository:
         self._session = session
 
     async def list_all(self, active_only: bool = False) -> list[RssSource]:
-        query = select(RssSource).options(selectinload(RssSource.category)).order_by(RssSource.id)
+        query = select(RssSource).options(
+            selectinload(RssSource.category),
+            selectinload(RssSource.source_relation)
+        ).order_by(RssSource.id)
         if active_only:
             query = query.where(RssSource.is_active.is_(True))
         result = await self._session.execute(query)
@@ -23,30 +26,37 @@ class RssSourceRepository:
     async def get_by_id(self, source_id: int) -> RssSource | None:
         result = await self._session.execute(
             select(RssSource)
-            .options(selectinload(RssSource.category))
+            .options(
+                selectinload(RssSource.category),
+                selectinload(RssSource.source_relation)
+            )
             .where(RssSource.id == source_id)
         )
         return result.scalar_one_or_none()
 
     async def get_by_feed_url(self, feed_url: str) -> RssSource | None:
-        return await self._session.scalar(select(RssSource).where(RssSource.feed_url == feed_url))
+        return await self._session.scalar(
+            select(RssSource)
+            .options(selectinload(RssSource.category), selectinload(RssSource.source_relation))
+            .where(RssSource.feed_url == feed_url)
+        )
 
     async def create(
         self,
         *,
-        source: str,
+        source_id: int,
         category_id: int,
         feed_url: str,
-        parser_key: str,
+        parse_key: str,
         is_active: bool = True,
     ) -> RssSource:
-        if parser_key not in VALID_PARSER_KEYS:
-            raise ValueError(f"Invalid parser_key. Must be one of: {sorted(VALID_PARSER_KEYS)}")
+        if parse_key not in VALID_PARSER_KEYS:
+            raise ValueError(f"Invalid parse_key. Must be one of: {sorted(VALID_PARSER_KEYS)}")
         row = RssSource(
-            source=source,
+            source_id=source_id,
             category_id=category_id,
             feed_url=feed_url,
-            parser_key=parser_key,
+            parse_key=parse_key,
             is_active=is_active,
         )
         self._session.add(row)
@@ -55,8 +65,8 @@ class RssSourceRepository:
         return row
 
     async def update(self, row: RssSource, **fields) -> RssSource:
-        if "parser_key" in fields and fields["parser_key"] not in VALID_PARSER_KEYS:
-            raise ValueError(f"Invalid parser_key. Must be one of: {sorted(VALID_PARSER_KEYS)}")
+        if "parse_key" in fields and fields["parse_key"] not in VALID_PARSER_KEYS:
+            raise ValueError(f"Invalid parse_key. Must be one of: {sorted(VALID_PARSER_KEYS)}")
         for key, value in fields.items():
             if value is not None:
                 setattr(row, key, value)

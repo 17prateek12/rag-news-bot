@@ -87,7 +87,9 @@ class VectorLoader:
                 chunks=chunks,
                 vectors=vectors,
             )
+            from datetime import datetime, timezone
             article.qdrant_point_ids = point_ids
+            article.embedded_at = datetime.now(timezone.utc)
             await self._session.commit()
             chunk_repo = ChunkRepository(self._session)
             await chunk_repo.replace_for_article(article, chunks, point_ids)

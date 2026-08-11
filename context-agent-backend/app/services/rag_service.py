@@ -24,7 +24,7 @@ class RAGService:
 
     def _final_limit(self, intent: QueryIntent, requested: int) -> int:
         if intent == QueryIntent.SINGLE_FACT:
-            return min(requested, 4)
+            return min(requested, 3)
         if intent == QueryIntent.CONTEXT:
             return min(requested, settings.context_chunk_limit)
         return requested
@@ -112,6 +112,7 @@ class RAGService:
         query: str,
         classification: IntentClassification,
         limit: int,
+        prior_sources: list[dict] | None = None,
     ) -> tuple[list[dict], dict]:
         final_limit = self._final_limit(classification.intent, limit)
         candidate_limit = self._candidate_limit(classification.intent, final_limit)
@@ -154,12 +155,76 @@ class RAGService:
                     len(hits),
                 )
 
+        # Filter local hits by score thresholds before checking for web fallback
+        hits = [
+            hit for hit in hits
+            if hit.get("from_web_fallback")
+            or (hit.get("semantic_score") is not None and hit.get("semantic_score") >= settings.semantic_similarity_threshold)
+            or (hit.get("score") is not None and hit.get("score") >= settings.semantic_similarity_threshold)
+            or (hit.get("bm25_score") is not None and hit.get("bm25_score") >= settings.bm25_relevance_threshold)
+        ]
+
+        # Merge relevant prior sources into candidates before web fallback/reranking
+        if prior_sources:
+            seen_urls = {hit.get("url") for hit in hits if hit.get("url")}
+            import re
+            def calculate_overlap_score(q: str, t: str) -> float:
+                qw = set(re.findall(r"\w+", q.lower()))
+                tw = set(re.findall(r"\w+", t.lower()))
+                if not qw:
+                    return 0.0
+                return len(qw.intersection(tw)) / len(qw)
+
+            for src in prior_sources:
+                if src.get("url") not in seen_urls:
+                    overlap = calculate_overlap_score(query, f"{src.get('title', '')} {src.get('chunk', '')}")
+                    if overlap >= 0.1 or settings.reranker_enabled:
+                        hits.append(src)
+
+        # Classify source types for bias tracking
+        from urllib.parse import urlparse
+        def classify_source_type(url: str, source_name: str = "") -> str:
+            domain = ""
+            if url:
+                try:
+                    domain = urlparse(url).netloc.lower()
+                    if domain.startswith("www."):
+                        domain = domain[4:]
+                except Exception:
+                    pass
+            name = (source_name or "").lower()
+            if domain.endswith((".gov", ".mil", ".gov.in", ".gov.uk")) or "government" in name or "official" in name:
+                return "government/official"
+            advocacy_keywords = {"afsc", "amnesty", "hrw", "greenpeace", "oxfam", "aclu", "sierra", "opinion", "advocacy"}
+            if any(kw in domain or kw in name for kw in advocacy_keywords):
+                return "advocacy/opinion"
+            return "wire/news"
+
+        for hit in hits:
+            hit["source_type"] = classify_source_type(hit.get("url"), hit.get("source"))
+
         local_hits_snapshot = list(hits)
         local_retrieval_snapshot = dict(retrieval)
 
         hits, web_meta = await self._maybe_web_fallback(query, hits, final_limit)
 
+        # Classify any new web fallback hits that were added
+        for hit in hits:
+            if "source_type" not in hit:
+                hit["source_type"] = classify_source_type(hit.get("url"), hit.get("source"))
+
         hits, rerank_meta = await self._apply_rerank(query, hits, final_limit)
+        
+        # Filter final hits one last time to ensure absolute relevance
+        hits = [
+            hit for hit in hits
+            if hit.get("from_web_fallback")
+            or hit.get("from_prior_turn")
+            or (hit.get("semantic_score") is not None and hit.get("semantic_score") >= settings.semantic_similarity_threshold)
+            or (hit.get("score") is not None and hit.get("score") >= settings.semantic_similarity_threshold)
+            or (hit.get("bm25_score") is not None and hit.get("bm25_score") >= settings.bm25_relevance_threshold)
+        ]
+
         retrieval = {
             **retrieval,
             **web_meta,
@@ -197,19 +262,50 @@ class RAGService:
         if not hits:
             parts.append("Context:\nNo relevant news excerpts were found.")
         else:
+            from datetime import datetime, timezone
+            from app.services.web_fallback_service import _parse_publish_date
+
+            def get_dt(h):
+                ds = h.get("publish_date")
+                if not ds:
+                    return datetime.min.replace(tzinfo=timezone.utc)
+                parsed = _parse_publish_date(ds)
+                return parsed if parsed is not None else datetime.min.replace(tzinfo=timezone.utc)
+
+            sorted_hits = sorted(hits, key=get_dt, reverse=True)
+            split_idx = max(2, len(sorted_hits) // 2) if len(sorted_hits) > 2 else len(sorted_hits)
+            most_recent = sorted_hits[:split_idx]
+            earlier = sorted_hits[split_idx:]
+
             blocks: list[str] = []
-            for idx, hit in enumerate(hits, start=1):
+
+            def format_block(hit: dict) -> str:
+                original_idx = hits.index(hit) + 1
                 tag = ""
                 if hit.get("from_background_search"):
                     tag = " [background-related]"
                 elif hit.get("from_web_fallback"):
                     tag = " [live web source]"
-                blocks.append(
-                    f"[{idx}] {hit.get('title', 'Untitled')} ({hit.get('source', 'unknown')}, "
+
+                src_type = hit.get("source_type", "wire/news")
+                tag += f" [source type: {src_type}]"
+
+                return (
+                    f"[{original_idx}] {hit.get('title', 'Untitled')} ({hit.get('source', 'unknown')}, "
                     f"{hit.get('publish_date', 'unknown date')}){tag}\n"
                     f"{hit.get('chunk', '')}\n"
                     f"URL: {hit.get('url', '')}"
                 )
+
+            if most_recent:
+                blocks.append("--- MOST RECENT UPDATES (Use these for the latest developments) ---")
+                for hit in most_recent:
+                    blocks.append(format_block(hit))
+            if earlier:
+                blocks.append("--- EARLIER COVERAGE & BACKGROUND (Use these for historical context) ---")
+                for hit in earlier:
+                    blocks.append(format_block(hit))
+
             parts.append("Context:\n" + "\n\n".join(blocks))
 
         parts.append(f"Question: {query}\n\nAnswer:")
@@ -221,10 +317,11 @@ class RAGService:
         *,
         limit: int = 6,
         history: list[ChatTurn] | None = None,
+        prior_sources: list[dict] | None = None,
         track_trending: bool = True,
     ) -> RAGResponse:
         history = history or []
-        logger.info("RAG query=%r limit=%s history_turns=%s", query, limit, len(history))
+        logger.info("RAG query=%r limit=%s history_turns=%s prior_sources=%s", query, limit, len(history), len(prior_sources) if prior_sources else 0)
 
         if not history and not web_fallback_service.is_enabled():
             cached_response = await asyncio.to_thread(cache_service.get_rag_response, query, limit)
@@ -235,28 +332,41 @@ class RAGService:
                 return RAGResponse(**cached_response)
 
         classification = intent_classifier.classify(query, history)
-        hits, retrieval = await self._retrieve_hits(query, classification, limit)
+        hits, retrieval = await self._retrieve_hits(query, classification, limit, prior_sources=prior_sources)
 
-        prompt = self._build_prompt(query, hits, classification, history)
-        answer = llm_service.generate(prompt)
-
-        sections = (
-            parse_context_sections(answer)
-            if classification.intent == QueryIntent.CONTEXT
-            else []
-        )
-
-        sources = [
-            SourceCitation(
-                index=idx,
-                title=hit.get("title", "Untitled"),
-                source=hit.get("source", "unknown"),
-                url=hit.get("url", ""),
-                publish_date=hit.get("publish_date"),
-                excerpt=(hit.get("chunk") or "")[:300],
+        if not hits:
+            answer = (
+                "I could not find any relevant news articles in the local database "
+                "or via live web search matching your question. Because strict grounding "
+                "is enabled, I cannot synthesize a response without verified sources to "
+                "prevent hallucination."
             )
-            for idx, hit in enumerate(hits, start=1)
-        ]
+            sections = []
+            sources = []
+        else:
+            prompt = self._build_prompt(query, hits, classification, history)
+            answer = llm_service.generate(prompt)
+
+            sections = (
+                parse_context_sections(answer)
+                if classification.intent == QueryIntent.CONTEXT
+                else []
+            )
+
+            sources = [
+                SourceCitation(
+                    index=idx,
+                    title=hit.get("title", "Untitled"),
+                    source=hit.get("source", "unknown"),
+                    url=hit.get("url", ""),
+                    publish_date=hit.get("publish_date"),
+                    excerpt=(hit.get("chunk") or "")[:300],
+                )
+                for idx, hit in enumerate(hits, start=1)
+            ]
+            import re
+            cited_indices = {int(m) for m in re.findall(r"\[(\d+)\]", answer)}
+            sources = [s for s in sources if s.index in cited_indices]
 
         logger.info(
             "RAG complete intent=%s sources=%s sections=%s reranked=%s cached=%s",
@@ -300,10 +410,80 @@ class RAGService:
                 response.model_dump(mode="json"),
             )
 
-        if track_trending:
+        if track_trending and hits:
             await asyncio.to_thread(cache_service.increment_trending, query)
 
         return response
+
+    async def query_stream(
+        self,
+        query: str,
+        *,
+        limit: int = 6,
+        history: list[ChatTurn] | None = None,
+        prior_sources: list[dict] | None = None,
+        track_trending: bool = True,
+    ):
+        history = history or []
+        logger.info("RAG query_stream query=%r limit=%s history_turns=%s prior_sources=%s", query, limit, len(history), len(prior_sources) if prior_sources else 0)
+
+        classification = intent_classifier.classify(query, history)
+        hits, retrieval = await self._retrieve_hits(query, classification, limit, prior_sources=prior_sources)
+
+        sources = [
+            SourceCitation(
+                index=idx,
+                title=hit.get("title", "Untitled"),
+                source=hit.get("source", "unknown"),
+                url=hit.get("url", ""),
+                publish_date=hit.get("publish_date"),
+                excerpt=(hit.get("chunk") or "")[:300],
+            )
+            for idx, hit in enumerate(hits, start=1)
+        ]
+
+        metadata = {
+            "type": "metadata",
+            "intent": classification.intent.value if hasattr(classification.intent, "value") else classification.intent,
+            "sources": [s.model_dump(mode="json") for s in sources],
+            "retrieval": {
+                "semantic_count": retrieval.get("semantic_count"),
+                "bm25_count": retrieval.get("bm25_count"),
+                "fused_count": retrieval.get("fused_count", len(hits)),
+                "web_fallback_used": retrieval.get("web_fallback_used"),
+            }
+        }
+        yield f"data: {orjson.dumps(metadata).decode('utf-8')}\n\n"
+
+        if not hits:
+            refusal = (
+                "I could not find any relevant news articles in the local database "
+                "or via live web search matching your question. Because strict grounding "
+                "is enabled, I cannot synthesize a response without verified sources to "
+                "prevent hallucination."
+            )
+            yield f"data: {orjson.dumps({'type': 'token', 'text': refusal}).decode('utf-8')}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        prompt = self._build_prompt(query, hits, classification, history)
+        full_text = []
+        try:
+            loop = asyncio.get_running_loop()
+            def fetch_stream():
+                return list(llm_service.generate_stream(prompt))
+            chunks = await loop.run_in_executor(None, fetch_stream)
+            for chunk in chunks:
+                full_text.append(chunk)
+                yield f"data: {orjson.dumps({'type': 'token', 'text': chunk}).decode('utf-8')}\n\n"
+        except Exception as exc:
+            logger.error("Error during streaming generation: %s", exc)
+            yield f"data: {orjson.dumps({'type': 'error', 'message': str(exc)}).decode('utf-8')}\n\n"
+
+        if track_trending and hits:
+            await asyncio.to_thread(cache_service.increment_trending, query)
+
+        yield "data: [DONE]\n\n"
 
     def classify_only(self, query: str, history: list[ChatTurn] | None = None) -> IntentClassification:
         return intent_classifier.classify(query, history or [])

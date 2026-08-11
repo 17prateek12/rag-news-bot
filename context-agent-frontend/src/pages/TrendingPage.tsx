@@ -90,7 +90,7 @@ export function TrendingPage() {
                 >
                   <div className="search-hit-meta">
                     <span className="badge">{hit.source}</span>
-                    {hit.categories.slice(0, 2).map((cat) => (
+                    {hit.categories.map((cat) => (
                       <span key={cat} className="badge badge-soft">
                         {cat}
                       </span>

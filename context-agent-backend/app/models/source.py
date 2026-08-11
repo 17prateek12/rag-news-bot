@@ -6,14 +6,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
 
-class Category(Base):
-    __tablename__ = "categories"
+class Source(Base):
+    __tablename__ = "sources"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
 
-    rss_sources: Mapped[list["RssSource"]] = relationship(back_populates="category")
-    articles: Mapped[list["Article"]] = relationship(
-        secondary="article_categories",
-        back_populates="categories_relation",
-    )
+    rss_feeds: Mapped[list["RssSource"]] = relationship(back_populates="source_relation")
+    articles: Mapped[list["Article"]] = relationship(back_populates="source_relation")

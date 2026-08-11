@@ -27,6 +27,19 @@ async def bootstrap_database(session: AsyncSession | None = None) -> None:
                 session.add(category)
                 category_map[name] = category
 
+        from app.models.source import Source
+        source_map: dict[str, Source] = {}
+        for feed in RSS_FEEDS:
+            src_name = feed["source"]
+            if src_name not in source_map:
+                existing_src = await session.scalar(select(Source).where(Source.name == src_name))
+                if existing_src:
+                    source_map[src_name] = existing_src
+                else:
+                    new_src = Source(name=src_name)
+                    session.add(new_src)
+                    source_map[src_name] = new_src
+
         await session.flush()
 
         for feed in RSS_FEEDS:
@@ -38,10 +51,10 @@ async def bootstrap_database(session: AsyncSession | None = None) -> None:
 
             session.add(
                 RssSource(
-                    source=feed["source"],
+                    source_id=source_map[feed["source"]].id,
                     category_id=category_map[feed["category"]].id,
                     feed_url=feed["feed_url"],
-                    parser_key=feed["parser_key"],
+                    parse_key=feed["parser_key"],
                     is_active=True,
                 )
             )

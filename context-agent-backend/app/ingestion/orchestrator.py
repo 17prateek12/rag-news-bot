@@ -119,7 +119,7 @@ class IngestOrchestrator:
         logger.info(
             "Ingest start source=%s parser=%s url=%s",
             rss_source.source,
-            rss_source.parser_key,
+            rss_source.parse_key,
             rss_source.feed_url,
         )
 
@@ -135,7 +135,7 @@ class IngestOrchestrator:
             logger.error("Ingest aborted for source=%s due to fetch failure", rss_source.source)
             return result
 
-        parser = ParserRegistry.get(rss_source.parser_key)
+        parser = ParserRegistry.get(rss_source.parse_key)
         context = FeedContext(
             source=rss_source.source,
             feed_url=rss_source.feed_url,
@@ -164,7 +164,7 @@ class IngestOrchestrator:
                     result.updated += 1
                     logger.debug("Updated article url=%s content_changed=%s", article.url, content_changed)
 
-                needs_embed = content_changed or not article.qdrant_point_ids
+                needs_embed = content_changed or (article.embedded_at is None)
                 if needs_embed:
                     embed_result = await self._vector_loader.embed_article(article)
                     if embed_result.embedded:

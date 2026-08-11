@@ -46,3 +46,14 @@ class ArticleRead(BaseModel):
     chunk_count: int = 0
     created_at: datetime
     updated_at: datetime | None
+
+
+class ArticleMetadata(BaseModel):
+    pageNo: int
+    limit: str | int
+    total: int
+
+
+class ArticleListResponse(BaseModel):
+    metadata: ArticleMetadata
+    articles: list[ArticleRead]

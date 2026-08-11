@@ -17,6 +17,17 @@ export interface Article {
   created_at: string
 }
 
+export interface ArticleMetadata {
+  pageNo: number
+  limit: number | 'all'
+  total: number
+}
+
+export interface PaginatedArticlesResponse {
+  metadata: ArticleMetadata
+  articles: Article[]
+}
+
 export interface User {
   id: string
   email: string

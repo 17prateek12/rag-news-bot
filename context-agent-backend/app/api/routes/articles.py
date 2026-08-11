@@ -8,21 +8,42 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.repositories.article_repository import ArticleRepository
 from app.repositories.qdrant_repo import qdrant_repository
-from app.schemas.article import ArticleRead
+from app.schemas.article import ArticleRead, ArticleListResponse, ArticleMetadata
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/articles", tags=["articles"])
 
 
-@router.get("", response_model=list[ArticleRead])
+@router.get("", response_model=ArticleListResponse)
 async def list_articles(
-    limit: int = Query(default=20, ge=1, le=100),
+    pageNo: int = Query(default=1, ge=1),
+    limit: str = Query(default="20"),
     source: str | None = None,
+    category: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     repo = ArticleRepository(db)
-    return await repo.list_articles(limit=limit, source=source)
+    articles, total = await repo.list_articles_paginated(
+        page_no=pageNo,
+        limit=limit,
+        source=source,
+        category=category,
+    )
+
+    try:
+        limit_rep = int(limit)
+    except ValueError:
+        limit_rep = "all"
+
+    return ArticleListResponse(
+        metadata=ArticleMetadata(
+            pageNo=pageNo,
+            limit=limit_rep,
+            total=total,
+        ),
+        articles=[ArticleRead.model_validate(art) for art in articles],
+    )
 
 
 @router.get("/{article_id}", response_model=ArticleRead)
