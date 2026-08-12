@@ -13,7 +13,6 @@ from app.schemas.search import HybridSearchResponse, SearchHit
 from app.services.cache_service import cache_service
 from app.services.hybrid_search_service import HybridSearchService
 from app.services.reranker_service import reranker_service
-from app.services.search_relevance import filter_hits_by_topic
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +39,11 @@ async def hybrid_search(
     db: AsyncSession = Depends(get_db),
 ):
     service = HybridSearchService(db)
+    
+    # Enforce rerank if topic_match is True
+    if topic_match:
+        rerank = True
+        
     candidate_limit = settings.rerank_candidate_limit if rerank else limit
     if topic_match:
         candidate_limit = max(candidate_limit, 40)
@@ -51,7 +55,7 @@ async def hybrid_search(
         results = await asyncio.to_thread(reranker_service.rerank, q, results, rerank_to)
 
     if topic_match:
-        results = filter_hits_by_topic(q, results)
+        results = [h for h in results if h.get("rerank_score", 0.0) >= settings.relevance_score_floor]
 
     results = results[:limit]
     return HybridSearchResponse(

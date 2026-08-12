@@ -15,17 +15,20 @@ from app.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 
-NER_PROMPT = """You are an expert Named Entity Recognition (NER) system.
-Extract all distinct named entities (such as people, organizations, locations, events, or technologies) from the following text.
+_nlp = None
 
-Format the output strictly as a JSON list of objects, each containing:
-- "name": The exact name of the entity as it appears or slightly normalized (e.g. "Narendra Modi", "United Nations", "SpaceX", "Bihar").
-- "type": One of "person", "organization", "location", "event", "technology", or "other".
 
-Do not return any extra markdown styling, notes, or wrapper text. Only return the valid JSON array.
-
-Text: {text}
-JSON:"""
+def _get_nlp():
+    global _nlp
+    if _nlp is None:
+        import spacy
+        try:
+            _nlp = spacy.load("en_core_web_sm")
+        except OSError:
+            from spacy.cli import download
+            download("en_core_web_sm")
+            _nlp = spacy.load("en_core_web_sm")
+    return _nlp
 
 
 class EntityService:
@@ -38,31 +41,36 @@ class EntityService:
     async def extract_entities(self, text: str) -> list[dict[str, str]]:
         if not text or not text.strip():
             return []
-        prompt = NER_PROMPT.format(text=text)
         try:
             loop = asyncio.get_running_loop()
-            def run_gen():
-                return llm_service.generate(prompt)
-            raw = await loop.run_in_executor(None, run_gen)
-            
-            # Clean markdown code blocks from response
-            cleaned = raw.strip()
-            if cleaned.startswith("```"):
-                # strip out ```json and ```
-                cleaned = re.sub(r"^```(?:json)?\n", "", cleaned)
-                cleaned = re.sub(r"\n```$", "", cleaned)
-                cleaned = cleaned.strip()
-
-            parsed = json.loads(cleaned)
-            if isinstance(parsed, list):
+            def run_spacy():
+                nlp = _get_nlp()
+                doc = nlp(text)
                 entities = []
-                for item in parsed:
-                    if isinstance(item, dict) and "name" in item:
+                type_mapping = {
+                    "PERSON": "person",
+                    "ORG": "organization",
+                    "GPE": "location",
+                    "LOC": "location",
+                    "EVENT": "event",
+                    "FAC": "other",
+                    "PRODUCT": "technology",
+                    "WORK_OF_ART": "other"
+                }
+                for ent in doc.ents:
+                    label = ent.label_
+                    if label in type_mapping:
                         entities.append({
-                            "name": str(item["name"]).strip(),
-                            "type": str(item.get("type", "other")).strip().lower()
+                            "name": ent.text.strip(),
+                            "type": type_mapping[label]
+                        })
+                    else:
+                        entities.append({
+                            "name": ent.text.strip(),
+                            "type": "other"
                         })
                 return entities
+            return await loop.run_in_executor(None, run_spacy)
         except Exception as exc:
             logger.warning("NER extraction failed for text: %s. Error: %s", text[:100], exc)
         return []

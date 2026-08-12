@@ -475,16 +475,10 @@ Rewritten Query:"""
 
         if track_trending and hits:
             try:
-                from app.services.entity_service import entity_service
-                from app.services.trending_service import trending_service
-                entities = await entity_service.extract_entities(query)
-                for entity_info in entities:
-                    entity_obj = await entity_service.get_or_create_canonical_entity(
-                        entity_info["name"], entity_info["type"], self._session
-                    )
-                    await trending_service.increment_query_count(entity_obj.id, self._session)
+                from app.worker.tasks import track_query_trending
+                track_query_trending.delay(query)
             except Exception as entity_exc:
-                logger.exception("Failed to record query trending: %s", entity_exc)
+                logger.exception("Failed to enqueue query trending: %s", entity_exc)
 
         return response
 
@@ -571,18 +565,47 @@ Rewritten Query:"""
             logger.error("Error during streaming generation: %s", exc)
             yield f"data: {orjson.dumps({'type': 'error', 'message': str(exc)}).decode('utf-8')}\n\n"
 
+        # Emit sources_final event based on what was actually cited in the generated text
+        try:
+            answer_text = "".join(full_text)
+            import re
+            cited_indices = {int(m) for m in re.findall(r"\[(\d+)\]", answer_text)}
+            
+            prior_sources_by_index = {}
+            if prior_sources:
+                for src in prior_sources:
+                    try:
+                        prior_sources_by_index[int(src.get("index") or 0)] = src
+                    except Exception:
+                        pass
+
+            filtered_sources = [s for s in sources if s.index in cited_indices]
+            current_indices = {s.index for s in filtered_sources}
+            for idx in cited_indices:
+                if idx not in current_indices and idx in prior_sources_by_index:
+                    prior_src = prior_sources_by_index[idx]
+                    from app.schemas.agent import SourceCitation
+                    filtered_sources.append(
+                        SourceCitation(
+                            index=idx,
+                            title=prior_src.get("title", "Untitled"),
+                            source=prior_src.get("source", "unknown"),
+                            url=prior_src.get("url", ""),
+                            publish_date=prior_src.get("publish_date"),
+                            excerpt=prior_src.get("chunk") or prior_src.get("excerpt"),
+                        )
+                    )
+            filtered_sources.sort(key=lambda s: s.index)
+            yield f"data: {orjson.dumps({'type': 'sources_final', 'sources': [s.model_dump(mode='json') for s in filtered_sources]}).decode('utf-8')}\n\n"
+        except Exception as citation_exc:
+            logger.exception("Failed to calculate final citations in stream: %s", citation_exc)
+
         if track_trending and hits:
             try:
-                from app.services.entity_service import entity_service
-                from app.services.trending_service import trending_service
-                entities = await entity_service.extract_entities(query)
-                for entity_info in entities:
-                    entity_obj = await entity_service.get_or_create_canonical_entity(
-                        entity_info["name"], entity_info["type"], self._session
-                    )
-                    await trending_service.increment_query_count(entity_obj.id, self._session)
+                from app.worker.tasks import track_query_trending
+                track_query_trending.delay(query)
             except Exception as entity_exc:
-                logger.exception("Failed to record query trending: %s", entity_exc)
+                logger.exception("Failed to enqueue query trending: %s", entity_exc)
 
         yield "data: [DONE]\n\n"
 

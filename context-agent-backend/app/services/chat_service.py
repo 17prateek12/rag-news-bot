@@ -227,7 +227,7 @@ class ChatService:
                         parsed = orjson.loads(raw_data)
                         if parsed.get("type") == "token":
                             full_text.append(parsed.get("text", ""))
-                        elif parsed.get("type") == "metadata":
+                        elif parsed.get("type") in ("metadata", "sources_final"):
                             from app.schemas.agent import SourceCitation
                             rag_sources = [SourceCitation(**s) for s in parsed.get("sources", [])]
                     except Exception:

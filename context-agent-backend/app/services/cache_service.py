@@ -7,8 +7,7 @@ import orjson
 
 from app.config import settings
 from app.core.redis_client import get_sync_redis
-from app.services.trending_filter import is_trending_worthy_query
-from app.services.trending_topic import extract_trending_topic, format_topic_label
+
 
 logger = logging.getLogger(__name__)
 
@@ -176,50 +175,7 @@ class CacheService:
             settings.web_fallback_cache_ttl_seconds,
         )
 
-    def increment_trending(self, query: str) -> None:
-        if not self._enabled() or not settings.cache_trending_enabled:
-            return
-        if not normalize_query(query) or not is_trending_worthy_query(query):
-            return
-        topic_key = extract_trending_topic(query)
-        if len(topic_key) < 3:
-            return
-        try:
-            client = self._redis()
-            client.zincrby(TRENDING_KEY, 1, topic_key)
-            client.expire(TRENDING_KEY, settings.cache_trending_ttl_seconds)
-            day_key = f"{TRENDING_KEY}:{date.today().isoformat()}"
-            client.zincrby(day_key, 1, topic_key)
-            client.expire(day_key, settings.cache_trending_ttl_seconds)
-        except Exception as exc:
-            logger.warning("Redis trending increment failed: %s", exc)
 
-    def get_trending(self, limit: int = 10) -> list[dict[str, Any]]:
-        if not self._enabled():
-            return []
-        try:
-            day_key = f"{TRENDING_KEY}:{date.today().isoformat()}"
-            items = self._redis().zrevrange(day_key, 0, limit * 5 - 1, withscores=True)
-            if not items:
-                items = self._redis().zrevrange(TRENDING_KEY, 0, limit * 5 - 1, withscores=True)
-            filtered: list[dict[str, Any]] = []
-            for raw_key, score in items:
-                topic_key = extract_trending_topic(str(raw_key))
-                if len(topic_key) < 3 or not is_trending_worthy_query(topic_key):
-                    continue
-                filtered.append(
-                    {
-                        "topic": format_topic_label(topic_key),
-                        "query": topic_key,
-                        "count": int(score),
-                    }
-                )
-                if len(filtered) >= limit:
-                    break
-            return filtered
-        except Exception as exc:
-            logger.warning("Redis trending read failed: %s", exc)
-            return []
 
     def session_messages_key(self, session_id: str) -> str:
         return f"chat:session:{session_id}:msgs"

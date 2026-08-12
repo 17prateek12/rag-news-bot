@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     reranker_enabled: bool
     reranker_model: str
     rerank_candidate_limit: int
+    relevance_score_floor: float
 
     # LLM (Vertex AI generation)
     gemini_model: str
