@@ -53,7 +53,7 @@ class RAGService:
             "candidate_count": len(hits),
             "rerank_top_k": top_k,
         }
-        if not settings.reranker_enabled or len(hits) <= top_k:
+        if not settings.reranker_enabled or not hits:
             return hits[:top_k], meta
 
         try:
@@ -234,9 +234,18 @@ class RAGService:
             hit for hit in hits
             if hit.get("from_web_fallback")
             or hit.get("from_prior_turn")
-            or (hit.get("semantic_score") is not None and hit.get("semantic_score") >= settings.semantic_similarity_threshold)
-            or (hit.get("score") is not None and hit.get("score") >= settings.semantic_similarity_threshold)
-            or (hit.get("bm25_score") is not None and hit.get("bm25_score") >= settings.bm25_relevance_threshold)
+            or (
+                hit.get("rerank_score") is not None
+                and hit.get("rerank_score") >= settings.relevance_score_floor
+            )
+            or (
+                hit.get("rerank_score") is None
+                and (
+                    (hit.get("semantic_score") is not None and hit.get("semantic_score") >= settings.semantic_similarity_threshold)
+                    or (hit.get("score") is not None and hit.get("score") >= settings.semantic_similarity_threshold)
+                    or (hit.get("bm25_score") is not None and hit.get("bm25_score") >= settings.bm25_relevance_threshold)
+                )
+            )
         ]
 
         retrieval = {
