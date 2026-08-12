@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react'
+import React, { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Loader2, Mic, Plus, Send, Square, Trash2 } from 'lucide-react'
 import { api } from '../api/client'
@@ -10,6 +10,59 @@ import {
   consumeVoice,
   getVoiceRemaining,
 } from '../lib/voiceQuota'
+
+function renderInlineStyles(text: string) {
+  const parts = text.split(/(\*\*.*?\*\*|\[\d+(?:,\s*\d+)*\])/g)
+  return parts.map((part, idx) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={idx}>{part.slice(2, -2)}</strong>
+    }
+    if (part.startsWith('[') && part.endsWith(']')) {
+      return (
+        <span key={idx} className="citation-badge">
+          {part}
+        </span>
+      )
+    }
+    return part
+  })
+}
+
+function MarkdownRenderer({ text }: { text: string }) {
+  if (!text) return null
+  const lines = text.split('\n')
+  return (
+    <div className="markdown-content">
+      {lines.map((line, idx) => {
+        const trimmed = line.trim()
+        if (!trimmed) return null
+        if (trimmed.startsWith('## ')) {
+          const headerText = trimmed.replace(/^##\s+/, '')
+          return (
+            <h3 key={idx} className="markdown-h3">
+              {renderInlineStyles(headerText)}
+            </h3>
+          )
+        }
+        if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+          const itemText = trimmed.replace(/^[-*]\s+/, '')
+          return (
+            <ul key={idx} className="markdown-ul">
+              <li className="markdown-li">
+                {renderInlineStyles(itemText)}
+              </li>
+            </ul>
+          )
+        }
+        return (
+          <p key={idx} className="markdown-p">
+            {renderInlineStyles(line)}
+          </p>
+        )
+      })}
+    </div>
+  )
+}
 
 function SourcesList({ sources }: { sources: SourceCitation[] }) {
   if (!sources.length) return null
@@ -46,6 +99,7 @@ export function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
+  const initializingRef = useRef(false)
 
   useEffect(() => {
     if (user) setVoiceRemaining(getVoiceRemaining(user.id))
@@ -59,30 +113,48 @@ export function ChatPage() {
 
   useEffect(() => {
     if (!user) return
+    let active = true
     ;(async () => {
       setLoadingSessions(true)
       try {
         const data = await api.listChatSessions()
+        if (!active) return
         setSessions(data)
-        if (!sessionId) {
+        if (!sessionId && !initializingRef.current) {
+          initializingRef.current = true
           const lastId = localStorage.getItem('last_chat_session_id')
           const lastExists = lastId && data.some((s) => s.id === lastId)
           if (lastExists) {
             navigate(`/chat/${lastId}`, { replace: true })
+            initializingRef.current = false
           } else if (data[0]) {
             navigate(`/chat/${data[0].id}`, { replace: true })
+            initializingRef.current = false
           } else {
-            const created = await api.createChatSession()
-            setSessions([created])
-            navigate(`/chat/${created.id}`, { replace: true })
+            try {
+              const created = await api.createChatSession()
+              if (active) {
+                setSessions([created])
+                navigate(`/chat/${created.id}`, { replace: true })
+              }
+            } finally {
+              initializingRef.current = false
+            }
           }
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load sessions')
+        if (active) {
+          setError(err instanceof Error ? err.message : 'Failed to load sessions')
+        }
       } finally {
-        setLoadingSessions(false)
+        if (active) {
+          setLoadingSessions(false)
+        }
       }
     })()
+    return () => {
+      active = false
+    }
   }, [user, sessionId, navigate])
 
   useEffect(() => {
@@ -280,7 +352,9 @@ export function ChatPage() {
           {messages.map((message) => (
             <div key={message.id} className={`chat-bubble ${message.role}`}>
               <div className="chat-bubble-label">{message.role === 'user' ? 'You' : 'Agent'}</div>
-              <div className="chat-bubble-text">{message.text}</div>
+              <div className="chat-bubble-text">
+                <MarkdownRenderer text={message.text} />
+              </div>
               {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
                 <SourcesList sources={message.sources} />
               )}

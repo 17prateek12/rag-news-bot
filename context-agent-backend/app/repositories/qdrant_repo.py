@@ -40,25 +40,38 @@ class QdrantRepository:
     def __init__(self) -> None:
         self._client = get_qdrant_client()
         self._collection = settings.qdrant_collection
+        self._entity_collection = "trending_entities"
 
     def ensure_collection(self) -> None:
         try:
             collections = {item.name for item in self._client.get_collections().collections}
-            if self._collection in collections:
+            if self._collection not in collections:
+                logger.info("Creating Qdrant collection: %s", self._collection)
+                self._client.create_collection(
+                    collection_name=self._collection,
+                    vectors_config=VectorParams(
+                        size=settings.embedding_dimensions,
+                        distance=Distance.COSINE,
+                    ),
+                )
+            else:
                 logger.info("Qdrant collection exists: %s", self._collection)
-                return
-            logger.info("Creating Qdrant collection: %s", self._collection)
-            self._client.create_collection(
-                collection_name=self._collection,
-                vectors_config=VectorParams(
-                    size=settings.embedding_dimensions,
-                    distance=Distance.COSINE,
-                ),
-            )
+
+            if self._entity_collection not in collections:
+                logger.info("Creating Qdrant entity collection: %s", self._entity_collection)
+                self._client.create_collection(
+                    collection_name=self._entity_collection,
+                    vectors_config=VectorParams(
+                        size=settings.embedding_dimensions,
+                        distance=Distance.COSINE,
+                    ),
+                )
+            else:
+                logger.info("Qdrant entity collection exists: %s", self._entity_collection)
         except Exception as exc:
             raise QdrantError(
-                "Failed to ensure Qdrant collection",
-                details={"collection": self._collection},
+                "Failed to ensure Qdrant collections",
+                details={"collection": self._collection, "entity_collection": self._entity_collection},
                 cause=exc,
             ) from exc
 
@@ -218,6 +231,54 @@ class QdrantRepository:
             for record in records
             if record.payload
         ]
+
+    def search_entities(self, query_vector: list[float], limit: int = 1) -> list[dict[str, Any]]:
+        try:
+            response = self._client.query_points(
+                collection_name=self._entity_collection,
+                query=query_vector,
+                limit=limit,
+                with_payload=True,
+            )
+            hits = response.points
+        except Exception as exc:
+            raise QdrantError(
+                "Qdrant entity search failed",
+                cause=exc,
+            ) from exc
+        return [
+            {
+                "score": hit.score,
+                "entity_id": uuid.UUID(hit.id) if isinstance(hit.id, str) else hit.id,
+                "canonical_name": hit.payload.get("canonical_name"),
+                "entity_type": hit.payload.get("entity_type"),
+            }
+            for hit in hits
+            if hit.payload
+        ]
+
+    def upsert_entity(self, entity_id: uuid.UUID, vector: list[float], canonical_name: str, entity_type: str) -> None:
+        try:
+            self._client.upsert(
+                collection_name=self._entity_collection,
+                points=[
+                    PointStruct(
+                        id=str(entity_id),
+                        vector=vector,
+                        payload={
+                            "canonical_name": canonical_name,
+                            "entity_type": entity_type,
+                            "created_at": datetime.utcnow().isoformat(),
+                        }
+                    )
+                ]
+            )
+        except Exception as exc:
+            raise QdrantError(
+                "Failed to upsert entity to Qdrant",
+                details={"entity_id": str(entity_id), "canonical_name": canonical_name},
+                cause=exc,
+            ) from exc
 
 
 qdrant_repository = QdrantRepository()

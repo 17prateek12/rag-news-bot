@@ -126,11 +126,18 @@ class WebFallbackService:
             logger.warning("Tavily search failed query=%r: %s", query, exc)
             return []
 
-        hits = [
-            self._to_hit(result, rank)
-            for rank, result in enumerate(response.get("results") or [], start=1)
-            if result.get("url") or result.get("title")
-        ]
+        seen_urls = set()
+        deduped_hits = []
+        for rank, result in enumerate(response.get("results") or [], start=1):
+            url = result.get("url")
+            if url:
+                norm_url = url.rstrip("/")
+                if norm_url in seen_urls:
+                    continue
+                seen_urls.add(norm_url)
+            if url or result.get("title"):
+                deduped_hits.append(self._to_hit(result, rank))
+        hits = deduped_hits
         cache_service.set_web_fallback(query, result_limit, hits)
         logger.info("Web fallback returned %s hits for query=%r", len(hits), query)
         return hits

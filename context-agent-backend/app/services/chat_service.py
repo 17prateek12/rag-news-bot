@@ -101,6 +101,41 @@ class ChatService:
             track_trending=track_trending,
         )
 
+        # Collect prior sources by index to resolve any dangling citations
+        prior_sources_by_index = {}
+        for msg in chat_session.messages:
+            if msg.role == "assistant" and msg.sources:
+                for src in msg.sources:
+                    try:
+                        prior_sources_by_index[int(src.get("index"))] = src
+                    except (ValueError, TypeError):
+                        pass
+
+        # Parse cited indices in the answer
+        import re
+        cited_indices = {int(m) for m in re.findall(r"\[(\d+)\]", rag.answer)}
+        
+        # Check for any cited index that is missing in current rag.sources
+        current_indices = {s.index for s in rag.sources}
+        final_sources = list(rag.sources)
+        for idx in cited_indices:
+            if idx not in current_indices and idx in prior_sources_by_index:
+                prior_src = prior_sources_by_index[idx]
+                from app.schemas.agent import SourceCitation
+                final_sources.append(
+                    SourceCitation(
+                        index=idx,
+                        title=prior_src.get("title", "Untitled"),
+                        source=prior_src.get("source", "unknown"),
+                        url=prior_src.get("url", ""),
+                        publish_date=prior_src.get("publish_date"),
+                        excerpt=prior_src.get("excerpt"),
+                    )
+                )
+        
+        final_sources.sort(key=lambda s: s.index)
+        rag.sources = final_sources
+
         user_message = await self._chat_repo.add_message(
             session_id,
             role="user",
@@ -202,7 +237,35 @@ class ChatService:
         answer_text = "".join(full_text)
         import re
         cited_indices = {int(m) for m in re.findall(r"\[(\d+)\]", answer_text)}
+        
+        # Collect prior sources by index to resolve any dangling citations
+        prior_sources_by_index = {}
+        for msg in chat_session.messages:
+            if msg.role == "assistant" and msg.sources:
+                for src in msg.sources:
+                    try:
+                        prior_sources_by_index[int(src.get("index"))] = src
+                    except (ValueError, TypeError):
+                        pass
+
         filtered_sources = [s for s in rag_sources if s.index in cited_indices]
+        current_indices = {s.index for s in filtered_sources}
+        for idx in cited_indices:
+            if idx not in current_indices and idx in prior_sources_by_index:
+                prior_src = prior_sources_by_index[idx]
+                from app.schemas.agent import SourceCitation
+                filtered_sources.append(
+                    SourceCitation(
+                        index=idx,
+                        title=prior_src.get("title", "Untitled"),
+                        source=prior_src.get("source", "unknown"),
+                        url=prior_src.get("url", ""),
+                        publish_date=prior_src.get("publish_date"),
+                        excerpt=prior_src.get("excerpt"),
+                    )
+                )
+        
+        filtered_sources.sort(key=lambda s: s.index)
 
         assistant_message = await self._chat_repo.add_message(
             session_id,

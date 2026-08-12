@@ -65,6 +65,40 @@ services:
     networks:
       - context-agent-net
 
+  celery_worker:
+    build: .
+    container_name: context-agent-worker
+    command: celery -A app.worker.celery_app.celery_app worker --loglevel=info
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    networks:
+      - context-agent-net
+
+  celery_beat:
+    build: .
+    container_name: context-agent-beat
+    command: celery -A app.worker.celery_app.celery_app beat --loglevel=info
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    networks:
+      - context-agent-net
+
 volumes:
   postgres_data:
   redis_data:

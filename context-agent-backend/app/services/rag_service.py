@@ -20,11 +20,14 @@ logger = logging.getLogger(__name__)
 
 class RAGService:
     def __init__(self, session: AsyncSession) -> None:
+        self._session = session
         self._search = HybridSearchService(session)
 
     def _final_limit(self, intent: QueryIntent, requested: int) -> int:
         if intent == QueryIntent.SINGLE_FACT:
             return min(requested, 3)
+        if intent == QueryIntent.FOLLOW_UP:
+            return min(requested, 4)
         if intent == QueryIntent.CONTEXT:
             return min(requested, settings.context_chunk_limit)
         return requested
@@ -113,8 +116,9 @@ class RAGService:
         classification: IntentClassification,
         limit: int,
         prior_sources: list[dict] | None = None,
+        bypass_single_fact_limit: bool = False,
     ) -> tuple[list[dict], dict]:
-        final_limit = self._final_limit(classification.intent, limit)
+        final_limit = limit if bypass_single_fact_limit else self._final_limit(classification.intent, limit)
         candidate_limit = self._candidate_limit(classification.intent, final_limit)
 
         cached = await asyncio.to_thread(
@@ -213,7 +217,17 @@ class RAGService:
             if "source_type" not in hit:
                 hit["source_type"] = classify_source_type(hit.get("url"), hit.get("source"))
 
-        hits, rerank_meta = await self._apply_rerank(query, hits, final_limit)
+        # Widen rerank limit if Tavily fallback is used to preserve redundancy (Fix 2)
+        rerank_limit = final_limit
+        if web_meta.get("web_fallback_used"):
+            if classification.intent == QueryIntent.SINGLE_FACT:
+                rerank_limit = max(rerank_limit, 4)
+            elif classification.intent == QueryIntent.FOLLOW_UP:
+                rerank_limit = max(rerank_limit, 5)
+            else:
+                rerank_limit = max(rerank_limit, 6)
+
+        hits, rerank_meta = await self._apply_rerank(query, hits, rerank_limit)
         
         # Filter final hits one last time to ensure absolute relevance
         hits = [
@@ -311,6 +325,37 @@ class RAGService:
         parts.append(f"Question: {query}\n\nAnswer:")
         return "\n\n".join(parts)
 
+    async def _rewrite_query(self, query: str, history: list[ChatTurn]) -> str:
+        if not history:
+            return query
+
+        history_text = "\n".join(f"{turn.role}: {turn.text}" for turn in history[-6:])
+        prompt = f"""You are an expert search query rewriter for a news Q&A agent.
+Your task is to rewrite the user's latest query into a standalone, fully-qualified search query that resolves any pronouns, typos, or context from the recent conversation history.
+
+Rules:
+- Extract the active topic (entities, subject, location, event) from the conversation history.
+- If the user's latest query is a follow-up, elliptical, brief, or has minor typos (like "jantar manter"), expand and correct it to include the specific entity names, locations, and topic of discussion so it can be searched independently.
+- If the user's latest query is already complete, standalone, or shifts the topic entirely, output it as-is (with minor spelling corrections if needed).
+- Do NOT answer the query. Just output the rewritten search query and nothing else.
+
+Recent conversation:
+{history_text}
+
+User's latest query: {query}
+Rewritten Query:"""
+        try:
+            loop = asyncio.get_running_loop()
+            def run_gen():
+                return llm_service.generate(prompt)
+            rewritten = await loop.run_in_executor(None, run_gen)
+            rewritten = rewritten.strip().strip('"').strip("'")
+            if rewritten:
+                return rewritten
+        except Exception as exc:
+            logger.warning("Query rewriting failed: %s", exc)
+        return query
+
     async def query(
         self,
         query: str,
@@ -332,7 +377,25 @@ class RAGService:
                 return RAGResponse(**cached_response)
 
         classification = intent_classifier.classify(query, history)
-        hits, retrieval = await self._retrieve_hits(query, classification, limit, prior_sources=prior_sources)
+        
+        # Rewrite query to anchor session topic and resolve phrasing/typos (Fix 2)
+        retrieval_query = query
+        if history:
+            retrieval_query = await self._rewrite_query(query, history)
+            logger.info("Rewritten retrieval query: %r -> %r", query, retrieval_query)
+
+        hits, retrieval = await self._retrieve_hits(retrieval_query, classification, limit, prior_sources=prior_sources)
+
+        # Retry with wider candidate window if empty and was limited (Fix 5)
+        if not hits and classification.intent == QueryIntent.SINGLE_FACT:
+            logger.info("Factual query returned empty hits, retrying with wider candidate limit")
+            hits, retrieval = await self._retrieve_hits(
+                retrieval_query,
+                classification,
+                limit,
+                prior_sources=prior_sources,
+                bypass_single_fact_limit=True,
+            )
 
         if not hits:
             answer = (
@@ -411,7 +474,17 @@ class RAGService:
             )
 
         if track_trending and hits:
-            await asyncio.to_thread(cache_service.increment_trending, query)
+            try:
+                from app.services.entity_service import entity_service
+                from app.services.trending_service import trending_service
+                entities = await entity_service.extract_entities(query)
+                for entity_info in entities:
+                    entity_obj = await entity_service.get_or_create_canonical_entity(
+                        entity_info["name"], entity_info["type"], self._session
+                    )
+                    await trending_service.increment_query_count(entity_obj.id, self._session)
+            except Exception as entity_exc:
+                logger.exception("Failed to record query trending: %s", entity_exc)
 
         return response
 
@@ -428,7 +501,25 @@ class RAGService:
         logger.info("RAG query_stream query=%r limit=%s history_turns=%s prior_sources=%s", query, limit, len(history), len(prior_sources) if prior_sources else 0)
 
         classification = intent_classifier.classify(query, history)
-        hits, retrieval = await self._retrieve_hits(query, classification, limit, prior_sources=prior_sources)
+
+        # Rewrite query to anchor session topic and resolve phrasing/typos (Fix 2)
+        retrieval_query = query
+        if history:
+            retrieval_query = await self._rewrite_query(query, history)
+            logger.info("Rewritten retrieval query for stream: %r -> %r", query, retrieval_query)
+
+        hits, retrieval = await self._retrieve_hits(retrieval_query, classification, limit, prior_sources=prior_sources)
+
+        # Retry with wider candidate window if empty and was limited (Fix 5)
+        if not hits and classification.intent == QueryIntent.SINGLE_FACT:
+            logger.info("Factual query returned empty hits in stream, retrying with wider candidate limit")
+            hits, retrieval = await self._retrieve_hits(
+                retrieval_query,
+                classification,
+                limit,
+                prior_sources=prior_sources,
+                bypass_single_fact_limit=True,
+            )
 
         sources = [
             SourceCitation(
@@ -481,7 +572,17 @@ class RAGService:
             yield f"data: {orjson.dumps({'type': 'error', 'message': str(exc)}).decode('utf-8')}\n\n"
 
         if track_trending and hits:
-            await asyncio.to_thread(cache_service.increment_trending, query)
+            try:
+                from app.services.entity_service import entity_service
+                from app.services.trending_service import trending_service
+                entities = await entity_service.extract_entities(query)
+                for entity_info in entities:
+                    entity_obj = await entity_service.get_or_create_canonical_entity(
+                        entity_info["name"], entity_info["type"], self._session
+                    )
+                    await trending_service.increment_query_count(entity_obj.id, self._session)
+            except Exception as entity_exc:
+                logger.exception("Failed to record query trending: %s", entity_exc)
 
         yield "data: [DONE]\n\n"
 

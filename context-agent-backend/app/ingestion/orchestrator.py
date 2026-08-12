@@ -169,6 +169,22 @@ class IngestOrchestrator:
                     embed_result = await self._vector_loader.embed_article(article)
                     if embed_result.embedded:
                         result.embedded += 1
+                        try:
+                            from app.services.entity_service import entity_service
+                            from app.services.trending_service import trending_service
+                            
+                            entities = await entity_service.extract_entities(article.title + " " + (article.summary or ""))
+                            for entity_info in entities:
+                                entity_obj = await entity_service.get_or_create_canonical_entity(
+                                    entity_info["name"], entity_info["type"], self._session
+                                )
+                                if entity_obj not in article.entities_relation:
+                                    article.entities_relation.append(entity_obj)
+                                    self._session.add(article)
+                                await trending_service.increment_news_count(entity_obj.id, self._session)
+                            await self._session.commit()
+                        except Exception as entity_exc:
+                            logger.exception("Failed to extract and link entities during ingestion for article %s: %s", article.id, entity_exc)
                     elif embed_result.skipped:
                         result.embed_skipped += 1
                         logger.info(

@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+from app.models.trending import article_entities, TrendingEntity
 
 
 article_categories = Table(
@@ -44,6 +45,11 @@ class Article(Base):
     source_relation: Mapped["Source"] = relationship(back_populates="articles", lazy="selectin")
     categories_relation: Mapped[list["Category"]] = relationship(
         secondary="article_categories",
+        back_populates="articles",
+        lazy="selectin",
+    )
+    entities_relation: Mapped[list["TrendingEntity"]] = relationship(
+        secondary=article_entities,
         back_populates="articles",
         lazy="selectin",
     )

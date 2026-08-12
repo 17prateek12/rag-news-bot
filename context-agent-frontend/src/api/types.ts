@@ -38,15 +38,18 @@ export interface AuthResponse {
   token_type: string
 }
 
-export interface TrendingQuery {
-  topic: string
-  query: string
-  count: number
+export interface TrendingEntityResponse {
+  id: string
+  canonical_name: string
+  entity_type: string | null
+  rank: number
+  score_level: string
 }
 
 export interface TrendingResponse {
   window: string
-  queries: TrendingQuery[]
+  trending_news: TrendingEntityResponse[]
+  trending_searches: TrendingEntityResponse[]
 }
 
 export interface SearchHit {

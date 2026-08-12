@@ -93,6 +93,8 @@ export const api = {
     ),
 
   getTrending: (limit = 15) => request<TrendingResponse>(`/trending?limit=${limit}`),
+  getTrendingArticles: (entityId: string) =>
+    request<HybridSearchResponse>(`/trending/entities/${entityId}/articles`),
 
   listChatSessions: () => request<ChatSession[]>('/chat/sessions', {}, true),
   createChatSession: (title?: string) =>

@@ -9,17 +9,38 @@ logger = logging.getLogger(__name__)
 
 CLASSIFY_PROMPT = """You are an intent classifier for a news Q&A agent.
 
-Classify the user query into exactly ONE intent:
+Classify the user query into exactly ONE of the three tiers/intents below based on the query scope and depth (do NOT decide based on question-word pattern matching alone):
 
-- single_fact: A narrow factual lookup (who, what, when, where, how many). Expect a short direct answer.
-- context: Wants background, explanation, significance, or an overview (why it matters, what's going on, summarize).
-- follow_up: Depends on earlier conversation (e.g. "what about the economy?", "tell me more", "and then?", "how does that affect India?").
+1. "single_fact" (Named-entity / definitional lookup)
+Criteria: The query asks for a specific, narrow, named attribute of a specific entity (such as a name, a date, a location, a count, or a capital). It has a single, definitive factual answer.
+Examples: 
+- "who is the ISRO chairman"
+- "when did Chandrayaan-3 land"
+- "what is the capital of France"
+- "how many gold medals did India win in the Olympics"
+
+2. "follow_up" (Explanatory / causal / follow-up query)
+Criteria: The query asks for a reason, cause, background, or explanation of an event/decision (e.g. why something happened, what triggered a protest, what the fallout is), or continues/clarifies a previous topic in the conversation history. It requires explaining a causal chain of events.
+Examples:
+- "why does the opposition want Amit Shah present"
+- "what triggered the protest in Delhi"
+- "why is the ISRO chairman facing criticism"
+- "why did Russia attack Ukraine"
+- "what was the police action taken against students"
+
+3. "context" (Broad overview / situational update)
+Criteria: The query asks for a general overview, summary, or update on a broad topic with no single expected answer, or asks what is happening in a broad setting.
+Examples:
+- "what happening in india parliament"
+- "tell me about the Chandrayaan mission"
+- "what is the status of the war in Ukraine"
+- "give me an update on the US election"
 
 {history_section}
 User query: {query}
 
 Respond with JSON only, no markdown:
-{{"intent": "single_fact" or "context" or "follow_up", "confidence": 0.0 to 1.0, "reason": "brief explanation"}}"""
+{{"intent": "single_fact" or "follow_up" or "context", "confidence": 0.0 to 1.0, "reason": "brief explanation"}}"""
 
 
 class IntentClassifier:
