@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import orjson
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -182,7 +183,7 @@ class RAGService:
             for src in prior_sources:
                 if src.get("url") not in seen_urls:
                     overlap = calculate_overlap_score(query, f"{src.get('title', '')} {src.get('chunk', '')}")
-                    if overlap >= 0.1 or settings.reranker_enabled:
+                    if overlap >= 0.1:
                         hits.append(src)
 
         # Classify source types for bias tracking
@@ -199,6 +200,7 @@ class RAGService:
             name = (source_name or "").lower()
             if domain.endswith((".gov", ".mil", ".gov.in", ".gov.uk")) or "government" in name or "official" in name:
                 return "government/official"
+            # Local keyword heuristics blocklist for lightweight classification of advocacy sources.
             advocacy_keywords = {"afsc", "amnesty", "hrw", "greenpeace", "oxfam", "aclu", "sierra", "opinion", "advocacy"}
             if any(kw in domain or kw in name for kw in advocacy_keywords):
                 return "advocacy/opinion"
@@ -377,13 +379,21 @@ Rewritten Query:"""
         history = history or []
         logger.info("RAG query=%r limit=%s history_turns=%s prior_sources=%s", query, limit, len(history), len(prior_sources) if prior_sources else 0)
 
-        if not history and not web_fallback_service.is_enabled():
+        if not history:
             cached_response = await asyncio.to_thread(cache_service.get_rag_response, query, limit)
             if cached_response is not None:
-                if track_trending:
-                    logger.debug("Skipping trending increment for cached RAG response")
+                logger.info("Serving RAG response from cache query=%r", query)
                 cached_response.setdefault("retrieval", {})["from_cache"] = True
-                return RAGResponse(**cached_response)
+                response = RAGResponse(**cached_response)
+                
+                # Increment trending searches count on cache hits (Issue 3)
+                if track_trending and response.sources:
+                    try:
+                        from app.worker.tasks import track_query_trending
+                        track_query_trending.delay(query)
+                    except Exception as entity_exc:
+                        logger.exception("Failed to enqueue query trending from cache: %s", entity_exc)
+                return response
 
         classification = intent_classifier.classify(query, history)
         
@@ -474,7 +484,7 @@ Rewritten Query:"""
             },
         )
 
-        if not history and not web_fallback_service.is_enabled():
+        if not history:
             await asyncio.to_thread(
                 cache_service.set_rag_response,
                 query,
@@ -502,6 +512,25 @@ Rewritten Query:"""
     ):
         history = history or []
         logger.info("RAG query_stream query=%r limit=%s history_turns=%s prior_sources=%s", query, limit, len(history), len(prior_sources) if prior_sources else 0)
+
+        # Cache read check for streaming first-turn queries (Issue 4)
+        if not history:
+            cached_response = await asyncio.to_thread(cache_service.get_rag_response, query, limit)
+            if cached_response is not None:
+                logger.info("Serving streamed RAG response from cache query=%r", query)
+                resp_obj = RAGResponse(**cached_response)
+                sources = resp_obj.sources
+                yield f"data: {orjson.dumps({'type': 'metadata', 'intent': resp_obj.intent.value, 'sources': [s.model_dump(mode='json') for s in sources]}).decode('utf-8')}\n\n"
+                yield f"data: {orjson.dumps({'type': 'token', 'text': resp_obj.answer}).decode('utf-8')}\n\n"
+                yield f"data: {orjson.dumps({'type': 'sources_final', 'sources': [s.model_dump(mode='json') for s in sources]}).decode('utf-8')}\n\n"
+                if track_trending and sources:
+                    try:
+                        from app.worker.tasks import track_query_trending
+                        track_query_trending.delay(query)
+                    except Exception as entity_exc:
+                        logger.exception("Failed to enqueue query trending from cache in stream: %s", entity_exc)
+                yield "data: [DONE]\n\n"
+                return
 
         classification = intent_classifier.classify(query, history)
 
@@ -608,6 +637,33 @@ Rewritten Query:"""
             yield f"data: {orjson.dumps({'type': 'sources_final', 'sources': [s.model_dump(mode='json') for s in filtered_sources]}).decode('utf-8')}\n\n"
         except Exception as citation_exc:
             logger.exception("Failed to calculate final citations in stream: %s", citation_exc)
+
+        # Save streamed response to RAG response cache for first-turn queries (Issue 4)
+        if not history and full_text:
+            try:
+                cached_data = {
+                    "query": query,
+                    "intent": classification.intent.value,
+                    "intent_confidence": classification.confidence,
+                    "intent_reason": classification.reason,
+                    "answer": answer_text,
+                    "sections": [],
+                    "sources": [s.model_dump(mode="json") for s in filtered_sources],
+                    "retrieval": {
+                        "web_fallback_used": retrieval.get("web_fallback_used"),
+                        "web_fallback_reason": retrieval.get("web_fallback_reason"),
+                        "web_fallback_count": retrieval.get("web_fallback_count"),
+                        "hits": hits,
+                    }
+                }
+                await asyncio.to_thread(
+                    cache_service.set_rag_response,
+                    query,
+                    limit,
+                    cached_data,
+                )
+            except Exception as cache_exc:
+                logger.warning("Failed to save streamed response to cache: %s", cache_exc)
 
         if track_trending and hits:
             try:
