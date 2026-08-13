@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +26,7 @@ class Settings(BaseSettings):
     cache_trending_enabled: bool
     cache_trending_ttl_seconds: int
     qdrant_url: str
+    qdrant_api_key: str
     qdrant_collection: str
 
     # Vertex AI / Embeddings
@@ -94,6 +96,15 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_algorithm: str
     jwt_expire_minutes: int
+
+    @model_validator(mode="after")
+    def adjust_redis_url(self) -> 'Settings':
+        for attr in ["redis_url", "celery_broker_url", "celery_result_backend"]:
+            val = getattr(self, attr, "")
+            if val and val.startswith("rediss://") and "ssl_cert_reqs" not in val:
+                separator = "&" if "?" in val else "?"
+                setattr(self, attr, f"{val}{separator}ssl_cert_reqs=CERT_NONE")
+        return self
 
 
 settings = Settings()

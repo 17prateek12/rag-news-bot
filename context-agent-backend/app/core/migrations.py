@@ -11,7 +11,7 @@ from app.core.logging_config import setup_logging
 def _run_alembic_upgrade() -> None:
     root = Path(__file__).resolve().parents[2]
     cfg = Config(str(root / "alembic.ini"))
-    cfg.set_main_option("sqlalchemy.url", settings.database_url)
+    cfg.set_main_option("sqlalchemy.url", settings.database_url.replace("%","%%"))
     command.upgrade(cfg, "head")
     setup_logging()
 

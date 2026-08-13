@@ -26,7 +26,7 @@ def get_qdrant_client() -> QdrantClient:
     if _client is None:
         logger.info("Connecting to Qdrant url=%s", settings.qdrant_url)
         try:
-            _client = QdrantClient(url=settings.qdrant_url, timeout=10)
+            _client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key, timeout=10)
         except Exception as exc:
             raise QdrantError(
                 "Failed to connect to Qdrant",
