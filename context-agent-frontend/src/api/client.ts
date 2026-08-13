@@ -1,6 +1,5 @@
 import type {
   ApiError,
-  Article,
   PaginatedArticlesResponse,
   AuthResponse,
   Category,

@@ -1,4 +1,4 @@
-import React, { type FormEvent, useEffect, useRef, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Loader2, Mic, Plus, Send, Square, Trash2 } from 'lucide-react'
 import { api } from '../api/client'
@@ -88,7 +88,6 @@ export function ChatPage() {
   const { sessionId } = useParams()
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [lastSources, setLastSources] = useState<SourceCitation[]>([])
   const [input, setInput] = useState('')
   const [loadingSessions, setLoadingSessions] = useState(false)
   const [loadingMessages, setLoadingMessages] = useState(false)
@@ -165,7 +164,6 @@ export function ChatPage() {
       try {
         const data = await api.listChatMessages(sessionId)
         setMessages(data)
-        setLastSources([])
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load messages')
       } finally {
@@ -219,7 +217,6 @@ export function ChatPage() {
         res.user_message,
         res.assistant_message,
       ])
-      setLastSources(res.sources)
       setSessions((prev) =>
         prev.map((s) => (s.id === sessionId ? { ...s, title: text.slice(0, 80) || s.title } : s)),
       )
@@ -256,7 +253,6 @@ export function ChatPage() {
         res.user_message,
         res.assistant_message,
       ])
-      setLastSources(res.sources)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Voice message failed')
       setMessages((prev) => prev.filter((m) => m.id !== tempUserMsg.id))

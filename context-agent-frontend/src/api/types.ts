@@ -78,7 +78,7 @@ export interface ChatMessage {
   id: string
   role: string
   text: string
-  sources: Record<string, unknown>[]
+  sources?: SourceCitation[]
   created_at: string
 }
 
