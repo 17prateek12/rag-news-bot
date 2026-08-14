@@ -26,7 +26,7 @@ def get_qdrant_client() -> QdrantClient:
     if _client is None:
         logger.info("Connecting to Qdrant url=%s", settings.qdrant_url)
         try:
-            _client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key, timeout=10)
+            _client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key, timeout=30)
         except Exception as exc:
             raise QdrantError(
                 "Failed to connect to Qdrant",
@@ -68,6 +68,17 @@ class QdrantRepository:
                 )
             else:
                 logger.info("Qdrant entity collection exists: %s", self._entity_collection)
+
+            # Ensure payload index for article_id exists
+            try:
+                self._client.create_payload_index(
+                    collection_name=self._collection,
+                    field_name="article_id",
+                    field_schema="keyword",
+                )
+                logger.info("Ensured keyword payload index for 'article_id' on collection %s", self._collection)
+            except Exception as index_exc:
+                logger.debug("Payload index creation skipped: %s", index_exc)
         except Exception as exc:
             raise QdrantError(
                 "Failed to ensure Qdrant collections",
