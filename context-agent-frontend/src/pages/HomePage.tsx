@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Article, Category, SearchHit } from '../api/types'
@@ -18,6 +18,12 @@ export function HomePage() {
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchError, setSearchError] = useState('')
 
+  // Infinite Scroll States
+  const [pageNo, setPageNo] = useState(1)
+  const [hasMore, setHasMore] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const observerTarget = useRef<HTMLDivElement | null>(null)
+
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -33,13 +39,21 @@ export function HomePage() {
     }
   }, [])
 
+  // Initial load for a category selection
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       setLoading(true)
+      setPageNo(1)
+      setHasMore(true)
       try {
-        const res = await api.listArticles(1, 'all', selectedCategory || undefined)
-        if (!cancelled) setArticles(res.articles)
+        const res = await api.listArticles(1, 12, selectedCategory || undefined)
+        if (!cancelled) {
+          setArticles(res.articles)
+          if (res.articles.length < 12 || res.articles.length >= res.metadata.total) {
+            setHasMore(false)
+          }
+        }
       } catch {
         if (!cancelled) setArticles([])
       } finally {
@@ -50,6 +64,52 @@ export function HomePage() {
       cancelled = true
     }
   }, [selectedCategory])
+
+  const fetchNextPage = async () => {
+    if (loading || loadingMore || !hasMore) return
+    setLoadingMore(true)
+    try {
+      const nextPage = pageNo + 1
+      const res = await api.listArticles(nextPage, 12, selectedCategory || undefined)
+      setArticles(prev => {
+        const combined = [...prev, ...res.articles]
+        if (combined.length >= res.metadata.total || res.articles.length < 12) {
+          setHasMore(false)
+        }
+        return combined
+      })
+      setPageNo(nextPage)
+    } catch (err) {
+      console.error('Failed to load more articles', err)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  // Set up IntersectionObserver sentinel
+  useEffect(() => {
+    if (loading || !hasMore) return
+
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting) {
+          fetchNextPage()
+        }
+      },
+      { threshold: 0.1 }
+    )
+
+    const currentTarget = observerTarget.current
+    if (currentTarget) {
+      observer.observe(currentTarget)
+    }
+
+    return () => {
+      if (currentTarget) {
+        observer.unobserve(currentTarget)
+      }
+    }
+  }, [loading, hasMore, pageNo, selectedCategory, loadingMore])
 
   useEffect(() => {
     if (!searchQuery) {
@@ -105,14 +165,30 @@ export function HomePage() {
           {loading ? (
             <div className="empty-state">Loading articles…</div>
           ) : (
-            <ArticleGrid
-              articles={articles}
-              emptyMessage={
-                selectedCategory
-                  ? `No articles in “${selectedCategory}” right now.`
-                  : 'No articles available yet.'
-              }
-            />
+            <>
+              <ArticleGrid
+                articles={articles}
+                emptyMessage={
+                  selectedCategory
+                    ? `No articles in “${selectedCategory}” right now.`
+                    : 'No articles available yet.'
+                }
+              />
+              {hasMore && (
+                <div
+                  ref={observerTarget}
+                  style={{
+                    textAlign: 'center',
+                    padding: '20px 0',
+                    color: 'var(--color-muted)',
+                    fontSize: '0.9rem',
+                    fontStyle: 'italic',
+                  }}
+                >
+                  {loadingMore ? 'Loading more articles…' : 'Scroll down to load more'}
+                </div>
+              )}
+            </>
           )}
         </>
       )}
