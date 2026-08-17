@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react'
+import { type FormEvent, useEffect, memo, useCallback, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Loader2, Mic, Plus, Send, Square, Trash2 } from 'lucide-react'
 import { api } from '../api/client'
@@ -28,7 +28,7 @@ function renderInlineStyles(text: string) {
   })
 }
 
-function MarkdownRenderer({ text }: { text: string }) {
+const MarkdownRenderer = memo(function MarkdownRenderer({ text }: { text: string }) {
   if (!text) return null
   const lines = text.split('\n')
   return (
@@ -62,9 +62,9 @@ function MarkdownRenderer({ text }: { text: string }) {
       })}
     </div>
   )
-}
+})
 
-function SourcesList({ sources }: { sources: SourceCitation[] }) {
+const SourcesList = memo(function SourcesList({ sources }: { sources: SourceCitation[] }) {
   if (!sources.length) return null
   return (
     <div className="chat-sources">
@@ -80,7 +80,7 @@ function SourcesList({ sources }: { sources: SourceCitation[] }) {
       </ul>
     </div>
   )
-}
+})
 
 export function ChatPage() {
   const { user, loading: authLoading, openAuth } = useAuth()
@@ -176,25 +176,29 @@ export function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
 
-  const createSession = async () => {
+  const createSession = useCallback(async () => {
     const created = await api.createChatSession()
     setSessions((prev) => [created, ...prev])
     navigate(`/chat/${created.id}`)
-  }
+  }, [navigate])
 
-  const deleteSession = async (id: string) => {
+  const deleteSession = useCallback(async (id: string) => {
     await api.deleteChatSession(id)
-    const remaining = sessions.filter((s) => s.id !== id)
-    setSessions(remaining)
-    if (sessionId === id) {
-      if (remaining[0]) navigate(`/chat/${remaining[0].id}`)
-      else {
-        const created = await api.createChatSession()
-        setSessions([created])
-        navigate(`/chat/${created.id}`)
+    setSessions((prev) => {
+      const remaining = prev.filter((s) => s.id !== id)
+      if (sessionId === id) {
+        if (remaining[0]) {
+          navigate(`/chat/${remaining[0].id}`)
+        } else {
+          api.createChatSession().then((created) => {
+            setSessions([created])
+            navigate(`/chat/${created.id}`)
+          })
+        }
       }
-    }
-  }
+      return remaining
+    })
+  }, [sessionId, navigate])
 
   const sendText = async (e?: FormEvent) => {
     e?.preventDefault()

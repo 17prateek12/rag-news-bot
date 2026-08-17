@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { Category } from '../../api/types'
 
 interface CategoryPillsProps {
@@ -6,7 +7,7 @@ interface CategoryPillsProps {
   onSelect: (name: string | null) => void
 }
 
-export function CategoryPills({ categories, selected, onSelect }: CategoryPillsProps) {
+export const CategoryPills = memo(function CategoryPills({ categories, selected, onSelect }: CategoryPillsProps) {
   return (
     <div className="category-pills">
       <button
@@ -28,4 +29,4 @@ export function CategoryPills({ categories, selected, onSelect }: CategoryPillsP
       ))}
     </div>
   )
-}
+})

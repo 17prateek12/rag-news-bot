@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { Article } from '../../api/types'
 import { formatRelative, truncate } from '../../lib/format'
 
@@ -5,7 +6,7 @@ interface ArticleCardProps {
   article: Article
 }
 
-export function ArticleCard({ article }: ArticleCardProps) {
+export const ArticleCard = memo(function ArticleCard({ article }: ArticleCardProps) {
   return (
     <a className="article-card" href={article.url} target="_blank" rel="noreferrer">
       <div className="article-card-image">
@@ -30,4 +31,4 @@ export function ArticleCard({ article }: ArticleCardProps) {
       </div>
     </a>
   )
-}
+})
