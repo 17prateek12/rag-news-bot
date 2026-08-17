@@ -7,6 +7,8 @@ from app.ingestion.orchestrator import IngestOrchestrator
 from app.services.retention_service import RetentionService
 from app.worker.celery_app import celery_app
 
+from app.core.redis_client import get_sync_redis
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,22 +20,62 @@ def _run_async(coro):
 def ingest_all_feeds() -> dict:
     setup_logging()
 
-    async def _run() -> dict:
-        async with AsyncSessionLocal() as session:
-            orchestrator = IngestOrchestrator(session)
-            results = await orchestrator.run_all()
-            return {
-                "feeds_processed": len(results),
-                "saved": sum(result.saved for result in results),
-                "updated": sum(result.updated for result in results),
-                "embedded": sum(result.embedded for result in results),
-                "errors": sum(len(result.errors) for result in results),
-            }
+    redis_client = get_sync_redis()
+    lock_key = "lock:ingest:all"
+    if not redis_client.set(lock_key, "true", ex=1800, nx=True):
+        logger.warning("Ingest all feeds task is already running. Skipping execution.")
+        return {"status": "skipped", "reason": "Already running"}
 
-    logger.info("Scheduled ingest task started")
-    payload = _run_async(_run())
-    logger.info("Scheduled ingest task complete payload=%s", payload)
-    return payload
+    try:
+        async def _run() -> dict:
+            async with AsyncSessionLocal() as session:
+                orchestrator = IngestOrchestrator(session)
+                results = await orchestrator.run_all()
+                return {
+                    "feeds_processed": len(results),
+                    "saved": sum(result.saved for result in results),
+                    "updated": sum(result.updated for result in results),
+                    "embedded": sum(result.embedded for result in results),
+                    "errors": sum(len(result.errors) for result in results),
+                }
+
+        logger.info("Scheduled ingest task started")
+        payload = _run_async(_run())
+        logger.info("Scheduled ingest task complete payload=%s", payload)
+        return payload
+    finally:
+        redis_client.delete(lock_key)
+
+
+@celery_app.task(name="app.worker.tasks.ingest_one_feed")
+def ingest_one_feed(source_id: int) -> dict:
+    setup_logging()
+
+    redis_client = get_sync_redis()
+    global_lock = "lock:ingest:all"
+    source_lock = f"lock:ingest:source:{source_id}"
+
+    if redis_client.get(global_lock):
+        logger.warning("Global ingestion is running. Skipping source ingest for source_id=%s.", source_id)
+        return {"status": "skipped", "reason": "Global ingestion in progress"}
+
+    if not redis_client.set(source_lock, "true", ex=600, nx=True):
+        logger.warning("Source ingestion for %s is already running. Skipping.", source_id)
+        return {"status": "skipped", "reason": "Already running"}
+
+    try:
+        async def _run() -> dict:
+            async with AsyncSessionLocal() as session:
+                orchestrator = IngestOrchestrator(session)
+                result = await orchestrator.run_by_id(source_id)
+                return result.__dict__
+
+        logger.info("Manual source ingest task started source_id=%s", source_id)
+        payload = _run_async(_run())
+        logger.info("Manual source ingest task complete payload=%s", payload)
+        return payload
+    finally:
+        redis_client.delete(source_lock)
 
 
 @celery_app.task(name="app.worker.tasks.cleanup_old_articles")

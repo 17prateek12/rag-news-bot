@@ -52,5 +52,5 @@ async def classify_query(
 ):
     """Debug endpoint: classify intent without retrieval or generation."""
     service = RAGService(db)
-    classification = service.classify_only(q)
+    classification = await service.classify_only(q)
     return ClassifyQueryResponse(query=q, classification=classification)

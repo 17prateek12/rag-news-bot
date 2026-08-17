@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.admin_auth import get_current_admin
 from app.core.database import get_db
+from app.core.rate_limit import rate_limit_login
 from app.core.security import create_admin_token, verify_password
 from app.models.admin import Admin
 from app.repositories.admin_repository import AdminRepository
@@ -11,7 +12,7 @@ from app.schemas.admin import AdminLoginRequest, AdminRead, AdminTokenResponse
 router = APIRouter(prefix="/admin", tags=["admin-auth"])
 
 
-@router.post("/login", response_model=AdminTokenResponse)
+@router.post("/login", response_model=AdminTokenResponse, dependencies=[Depends(rate_limit_login)])
 async def admin_login(payload: AdminLoginRequest, db: AsyncSession = Depends(get_db)):
     repo = AdminRepository(db)
     admin = await repo.get_by_email(payload.email)

@@ -184,6 +184,7 @@ class IngestOrchestrator:
                                 await trending_service.increment_news_count(entity_obj.id, self._session)
                             await self._session.commit()
                         except Exception as entity_exc:
+                            await self._session.rollback()
                             logger.exception("Failed to extract and link entities during ingestion for article %s: %s", article.id, entity_exc)
                     elif embed_result.skipped:
                         result.embed_skipped += 1
@@ -205,6 +206,7 @@ class IngestOrchestrator:
                     result.embed_skipped += 1
                     logger.debug("Embed skipped unchanged article_id=%s", article.id)
             except Exception as exc:
+                await self._session.rollback()
                 self._record_error(
                     result,
                     stage="parse",

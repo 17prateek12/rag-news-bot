@@ -1,11 +1,8 @@
 import logging
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.admin_auth import get_current_admin
-from app.core.database import get_db
-from app.ingestion.orchestrator import IngestOrchestrator
 from app.models.admin import Admin
 
 logger = logging.getLogger(__name__)
@@ -16,14 +13,14 @@ router = APIRouter(prefix="/admin/ingest", tags=["admin-ingest"])
 @router.post("/run")
 async def run_ingest_all(
     _: Admin = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_db),
 ):
-    logger.info("Admin ingest all requested")
-    orchestrator = IngestOrchestrator(db)
-    results = await orchestrator.run_all()
+    logger.info("Admin ingest all requested - dispatching to Celery background task")
+    from app.worker.tasks import ingest_all_feeds
+    task = ingest_all_feeds.delay()
     return {
-        "feeds_processed": len(results),
-        "results": [result.__dict__ for result in results],
+        "status": "queued",
+        "task_id": task.id,
+        "message": "Global feed ingestion has been queued in the background worker."
     }
 
 
@@ -31,9 +28,12 @@ async def run_ingest_all(
 async def run_ingest_one(
     source_id: int,
     _: Admin = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_db),
 ):
-    logger.info("Admin ingest requested source_id=%s", source_id)
-    orchestrator = IngestOrchestrator(db)
-    result = await orchestrator.run_by_id(source_id)
-    return result.__dict__
+    logger.info("Admin ingest requested source_id=%s - dispatching to Celery background task", source_id)
+    from app.worker.tasks import ingest_one_feed
+    task = ingest_one_feed.delay(source_id)
+    return {
+        "status": "queued",
+        "task_id": task.id,
+        "message": f"Feed ingestion for source {source_id} has been queued in the background worker."
+    }

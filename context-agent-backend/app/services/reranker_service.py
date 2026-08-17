@@ -1,4 +1,5 @@
 import logging
+import threading
 from typing import Any
 
 from app.config import settings
@@ -6,15 +7,18 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _model = None
+_model_lock = threading.Lock()
 
 
 def _get_model():
     global _model
     if _model is None:
-        from sentence_transformers import CrossEncoder
+        with _model_lock:
+            if _model is None:
+                from sentence_transformers import CrossEncoder
 
-        logger.info("Loading reranker model=%s", settings.reranker_model)
-        _model = CrossEncoder(settings.reranker_model)
+                logger.info("Loading reranker model=%s", settings.reranker_model)
+                _model = CrossEncoder(settings.reranker_model)
     return _model
 
 

@@ -102,6 +102,7 @@ class VectorLoader:
             )
             return EmbedResult(embedded=True, skipped=False, chunk_count=len(point_ids))
         except AppError as exc:
+            await self._session.rollback()
             logger.error(
                 "Embed failed article_id=%s code=%s message=%s",
                 article.id,
@@ -115,6 +116,7 @@ class VectorLoader:
                 error_code=exc.code,
             )
         except Exception as exc:
+            await self._session.rollback()
             logger.exception("Unexpected embed failure article_id=%s", article.id)
             return EmbedResult(
                 embedded=False,

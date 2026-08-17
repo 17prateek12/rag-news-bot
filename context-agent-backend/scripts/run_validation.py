@@ -58,7 +58,10 @@ def main() -> None:
         elif name == "qdrant" and ok:
             extra = f" points={b.get('points_count')}"
         elif name == "ingest" and ok:
-            extra = f" embedded={b.get('embedded')} skipped={b.get('embed_skipped')}"
+            if b.get("status") == "queued":
+                extra = f" status={b.get('status')} task_id={b.get('task_id')[:8]}..."
+            else:
+                extra = f" embedded={b.get('embedded')} skipped={b.get('embed_skipped')}"
         elif not ok:
             extra = " " + str(b)[:300]
         print(f"{'PASS' if ok else 'FAIL'} {name} ({res['status']}){extra}")

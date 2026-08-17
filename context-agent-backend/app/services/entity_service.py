@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import re
+import threading
 import uuid
 from typing import Any
 
@@ -16,18 +17,21 @@ from app.services.llm_service import llm_service
 logger = logging.getLogger(__name__)
 
 _nlp = None
+_nlp_lock = threading.Lock()
 
 
 def _get_nlp():
     global _nlp
     if _nlp is None:
-        import spacy
-        try:
-            _nlp = spacy.load("en_core_web_sm")
-        except OSError:
-            from spacy.cli import download
-            download("en_core_web_sm")
-            _nlp = spacy.load("en_core_web_sm")
+        with _nlp_lock:
+            if _nlp is None:
+                import spacy
+                try:
+                    _nlp = spacy.load("en_core_web_sm")
+                except OSError:
+                    from spacy.cli import download
+                    download("en_core_web_sm")
+                    _nlp = spacy.load("en_core_web_sm")
     return _nlp
 
 
@@ -57,18 +61,16 @@ class EntityService:
                     "PRODUCT": "technology",
                     "WORK_OF_ART": "other"
                 }
+                EXCLUDED_LABELS = {"CARDINAL", "DATE", "TIME", "PERCENT", "MONEY", "ORDINAL", "QUANTITY"}
                 for ent in doc.ents:
                     label = ent.label_
-                    if label in type_mapping:
-                        entities.append({
-                            "name": ent.text.strip(),
-                            "type": type_mapping[label]
-                        })
-                    else:
-                        entities.append({
-                            "name": ent.text.strip(),
-                            "type": "other"
-                        })
+                    if label in EXCLUDED_LABELS:
+                        continue
+                    entity_type = type_mapping.get(label, "other")
+                    entities.append({
+                        "name": ent.text.strip(),
+                        "type": entity_type
+                    })
                 return entities
             return await loop.run_in_executor(None, run_spacy)
         except Exception as exc:

@@ -395,7 +395,8 @@ Rewritten Query:"""
                         logger.exception("Failed to enqueue query trending from cache: %s", entity_exc)
                 return response
 
-        classification = intent_classifier.classify(query, history)
+        loop = asyncio.get_running_loop()
+        classification = await loop.run_in_executor(None, intent_classifier.classify, query, history)
         
         # Rewrite query to anchor session topic and resolve phrasing/typos (Fix 2)
         retrieval_query = query
@@ -427,7 +428,8 @@ Rewritten Query:"""
             sources = []
         else:
             prompt = self._build_prompt(query, hits, classification, history)
-            answer = llm_service.generate(prompt)
+            loop = asyncio.get_running_loop()
+            answer = await loop.run_in_executor(None, llm_service.generate, prompt)
 
             sections = (
                 parse_context_sections(answer)
@@ -532,7 +534,8 @@ Rewritten Query:"""
                 yield "data: [DONE]\n\n"
                 return
 
-        classification = intent_classifier.classify(query, history)
+        loop = asyncio.get_running_loop()
+        classification = await loop.run_in_executor(None, intent_classifier.classify, query, history)
 
         # Rewrite query to anchor session topic and resolve phrasing/typos (Fix 2)
         retrieval_query = query
@@ -674,5 +677,6 @@ Rewritten Query:"""
 
         yield "data: [DONE]\n\n"
 
-    def classify_only(self, query: str, history: list[ChatTurn] | None = None) -> IntentClassification:
-        return intent_classifier.classify(query, history or [])
+    async def classify_only(self, query: str, history: list[ChatTurn] | None = None) -> IntentClassification:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, intent_classifier.classify, query, history or [])
