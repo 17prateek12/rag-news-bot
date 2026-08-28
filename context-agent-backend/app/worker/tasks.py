@@ -1,4 +1,6 @@
 import asyncio
+from datetime import datetime, timezone
+import json
 import logging
 
 from app.core.database import AsyncSessionLocal
@@ -42,6 +44,22 @@ def ingest_all_feeds() -> dict:
         logger.info("Scheduled ingest task started")
         payload = _run_async(_run())
         logger.info("Scheduled ingest task complete payload=%s", payload)
+
+        # Publish updates event if new articles saved/embedded
+        if payload.get("saved", 0) > 0 or payload.get("embedded", 0) > 0:
+            try:
+                update_msg = {
+                    "event": "news_updated",
+                    "saved": payload.get("saved", 0),
+                    "embedded": payload.get("embedded", 0),
+                    "source": "all",
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+                redis_client.publish("news:updates", json.dumps(update_msg))
+                logger.info("Published news:updates event to Redis")
+            except Exception as pub_err:
+                logger.error("Failed to publish news update to Redis: %s", pub_err)
+
         return payload
     finally:
         redis_client.delete(lock_key)
@@ -73,6 +91,22 @@ def ingest_one_feed(source_id: int) -> dict:
         logger.info("Manual source ingest task started source_id=%s", source_id)
         payload = _run_async(_run())
         logger.info("Manual source ingest task complete payload=%s", payload)
+
+        # Publish updates event if new articles saved/embedded
+        if payload.get("saved", 0) > 0 or payload.get("embedded", 0) > 0:
+            try:
+                update_msg = {
+                    "event": "news_updated",
+                    "saved": payload.get("saved", 0),
+                    "embedded": payload.get("embedded", 0),
+                    "source": source_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+                redis_client.publish("news:updates", json.dumps(update_msg))
+                logger.info("Published news:updates event to Redis for source_id=%s", source_id)
+            except Exception as pub_err:
+                logger.error("Failed to publish news update to Redis: %s", pub_err)
+
         return payload
     finally:
         redis_client.delete(source_lock)

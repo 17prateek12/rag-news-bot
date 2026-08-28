@@ -20,6 +20,7 @@ from app.api.routes.rss_sources import router as rss_sources_router
 from app.api.routes.search import router as search_router
 from app.api.routes.speech import router as speech_router
 from app.api.routes.trending import router as trending_router
+from app.api.routes.ws import router as ws_router, redis_updates_listener
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging_config import setup_logging
 from app.core.request_logging import RequestLoggingMiddleware
@@ -30,9 +31,15 @@ setup_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
     setup_logging()
     await run_startup()
+    # Start Redis Pub/Sub background listener for real-time websocket broadcasts
+    app.state.ws_listener_task = asyncio.create_task(redis_updates_listener())
     yield
+    # Cleanup task on application shutdown
+    if hasattr(app.state, "ws_listener_task"):
+        app.state.ws_listener_task.cancel()
 
 
 app = FastAPI(
@@ -64,6 +71,7 @@ app.include_router(agent_router)
 app.include_router(auth_router)
 app.include_router(speech_router)
 app.include_router(chat_router)
+app.include_router(ws_router)
 
 # Admin-only (writes + ingest + ops)
 app.include_router(admin_auth_router)

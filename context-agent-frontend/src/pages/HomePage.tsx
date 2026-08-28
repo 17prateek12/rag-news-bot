@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { api } from '../api/client'
-import type { Article, Category, SearchHit } from '../api/types'
+import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
+import { api, API_BASE } from '../api/client'
+import type { Category, SearchHit } from '../api/types'
 import { ArticleGrid } from '../components/articles/ArticleGrid'
 import { CategoryPills } from '../components/articles/CategoryPills'
 import { SearchResults } from '../components/search/SearchResults'
@@ -9,90 +10,133 @@ import { SearchResults } from '../components/search/SearchResults'
 export function HomePage() {
   const [searchParams] = useSearchParams()
   const searchQuery = searchParams.get('q') ?? ''
+  const queryClient = useQueryClient()
 
-  const [categories, setCategories] = useState<Category[]>([])
-  const [articles, setArticles] = useState<Article[]>([])
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
   const [searchResults, setSearchResults] = useState<SearchHit[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchError, setSearchError] = useState('')
 
-  // Infinite Scroll States
-  const [pageNo, setPageNo] = useState(1)
-  const [hasMore, setHasMore] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
+  // Connection status for real-time WebSocket updates
+  const [wsConnected, setWsConnected] = useState(false)
   const observerTarget = useRef<HTMLDivElement | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const cats = await api.listCategories()
-        if (!cancelled) setCategories(cats)
-      } catch (err) {
-        console.error('Failed to list categories', err)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  // Fetch Category pills using React Query (cached)
+  const { data: categories = [] } = useQuery<Category[]>({
+    queryKey: ['categories'],
+    queryFn: () => api.listCategories(),
+  })
 
-  // Initial load for a category selection
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      setPageNo(1)
-      setHasMore(true)
-      try {
-        const res = await api.listArticles(1, 12, selectedCategory || undefined)
-        if (!cancelled) {
-          setArticles(res.articles)
-          if (res.articles.length < 12 || res.articles.length >= res.metadata.total) {
-            setHasMore(false)
-          }
-        }
-      } catch {
-        if (!cancelled) setArticles([])
-      } finally {
-        if (!cancelled) setLoading(false)
+  // Fetch Infinite Articles using React Query
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading: loading,
+  } = useInfiniteQuery({
+    queryKey: ['articles', selectedCategory],
+    queryFn: ({ pageParam = 1 }) =>
+      api.listArticles(pageParam as number, 12, selectedCategory || undefined),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const currentFetched = allPages.reduce((acc, page) => acc + page.articles.length, 0)
+      if (currentFetched >= lastPage.metadata.total || lastPage.articles.length < 12) {
+        return undefined
       }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [selectedCategory])
+      return allPages.length + 1
+    },
+    // HTTP fallback: if WebSocket is disconnected, poll the backend every 30 seconds
+    refetchInterval: wsConnected ? false : 30000,
+  })
 
-  const fetchNextPage = async () => {
-    if (loading || loadingMore || !hasMore) return
-    setLoadingMore(true)
-    try {
-      const nextPage = pageNo + 1
-      const res = await api.listArticles(nextPage, 12, selectedCategory || undefined)
-      setArticles(prev => {
-        const combined = [...prev, ...res.articles]
-        if (combined.length >= res.metadata.total || res.articles.length < 12) {
-          setHasMore(false)
-        }
-        return combined
-      })
-      setPageNo(nextPage)
-    } catch (err) {
-      console.error('Failed to load more articles', err)
-    } finally {
-      setLoadingMore(false)
+  const articles = data ? data.pages.flatMap((page) => page.articles) : []
+
+  // Throttled query invalidator to prevent update storms
+  const invalidateRef = useRef<() => void>(undefined)
+  if (!invalidateRef.current) {
+    let lastCall = 0
+    const cooldown = 5000 // 5 seconds throttle
+    invalidateRef.current = () => {
+      const now = Date.now()
+      if (now - lastCall >= cooldown) {
+        lastCall = now
+        queryClient.invalidateQueries({ queryKey: ['articles'] })
+      }
     }
   }
 
-  // Set up IntersectionObserver sentinel
+  // Connect to real-time WebSockets
   useEffect(() => {
-    if (loading || !hasMore) return
+    const getWsUrl = () => {
+      let base = API_BASE
+      if (base.startsWith('/')) {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+        const host = window.location.host
+        return `${protocol}//${host}${base}/ws/news`
+      }
+      return base.replace(/^http/, 'ws') + '/ws/news'
+    }
+
+    let socket: WebSocket | null = null
+    let reconnectTimer: number | null = null
+    let isCancelled = false
+
+    const connect = () => {
+      if (isCancelled) return
+      
+      const url = getWsUrl()
+      console.info("Connecting to WebSocket:", url)
+      socket = new WebSocket(url)
+
+      socket.onopen = () => {
+        console.info("WebSocket connection established successfully")
+        if (!isCancelled) setWsConnected(true)
+      }
+
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data)
+          console.info("WebSocket news event received:", payload)
+          if (payload.event === 'news_updated') {
+            // Trigger throttled refresh of the feed in real-time
+            invalidateRef.current?.()
+          }
+        } catch (err) {
+          console.error("Failed to parse WebSocket message:", err)
+        }
+      }
+
+      socket.onclose = () => {
+        console.info("WebSocket connection closed. Retrying in 5 seconds...")
+        if (!isCancelled) {
+          setWsConnected(false)
+          reconnectTimer = window.setTimeout(connect, 5000)
+        }
+      }
+
+      socket.onerror = (err) => {
+        console.error("WebSocket error:", err)
+        socket?.close()
+      }
+    }
+
+    connect()
+
+    return () => {
+      isCancelled = true
+      if (socket) socket.close()
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+    }
+  }, [queryClient])
+
+  // Setup infinite scroll observer sentinel
+  useEffect(() => {
+    if (loading || !hasNextPage) return
 
     const observer = new IntersectionObserver(
-      entries => {
-        if (entries[0].isIntersecting) {
+      (entries) => {
+        if (entries[0].isIntersecting && !isFetchingNextPage) {
           fetchNextPage()
         }
       },
@@ -109,8 +153,9 @@ export function HomePage() {
         observer.unobserve(currentTarget)
       }
     }
-  }, [loading, hasMore, pageNo, selectedCategory, loadingMore])
+  }, [loading, hasNextPage, isFetchingNextPage, fetchNextPage, selectedCategory])
 
+  // Fetch search matches
   useEffect(() => {
     if (!searchQuery) {
       setSearchResults([])
@@ -174,7 +219,7 @@ export function HomePage() {
                     : 'No articles available yet.'
                 }
               />
-              {hasMore && (
+              {(hasNextPage || isFetchingNextPage) && (
                 <div
                   ref={observerTarget}
                   style={{
@@ -185,7 +230,7 @@ export function HomePage() {
                     fontStyle: 'italic',
                   }}
                 >
-                  {loadingMore ? 'Loading more articles…' : 'Scroll down to load more'}
+                  {isFetchingNextPage ? 'Loading more articles…' : 'Scroll down to load more'}
                 </div>
               )}
             </>

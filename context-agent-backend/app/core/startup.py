@@ -2,7 +2,7 @@ import asyncio
 import logging
 import traceback
 
-from app.config import settings
+from app.config import settings, DEFAULT_JWT_SECRET
 from app.core.bootstrap import run_bootstrap
 from app.core.database import AsyncSessionLocal
 from app.core.logging_config import setup_logging
@@ -38,7 +38,7 @@ async def ensure_singleton_admin() -> None:
 
 async def run_startup() -> None:
     # Security Validation: Fail startup if default JWT secret is left unchanged
-    if settings.jwt_secret == "change-me-jwt-secret":
+    if settings.jwt_secret == DEFAULT_JWT_SECRET:
         logger.critical("SECURITY ERROR: Default jwt_secret detected. Startup aborted.")
         raise ValueError("Default JWT secret must be changed in the config/.env file.")
 

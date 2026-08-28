@@ -12,7 +12,7 @@ import type {
 } from './types'
 
 export const API_BASE =
-  import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? '/api' : 'http://localhost:8000')
+  import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? '/api' : '')
 
 const TOKEN_KEY = 'context_agent_token'
 

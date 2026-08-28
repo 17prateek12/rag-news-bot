@@ -2,6 +2,9 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+DEFAULT_JWT_SECRET = "change-me-jwt-secret"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -26,7 +29,7 @@ class Settings(BaseSettings):
     cache_trending_enabled: bool
     cache_trending_ttl_seconds: int
     qdrant_url: str
-    qdrant_api_key: str
+    qdrant_api_key: str | None = None
     qdrant_collection: str
 
     # Vertex AI / Embeddings
@@ -93,7 +96,7 @@ class Settings(BaseSettings):
     admin_email: str
     admin_password: str
     admin_api_key: str
-    jwt_secret: str
+    jwt_secret: str = DEFAULT_JWT_SECRET
     jwt_algorithm: str
     jwt_expire_minutes: int
 
