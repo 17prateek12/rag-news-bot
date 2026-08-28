@@ -6,6 +6,7 @@ import logging
 from app.core.database import AsyncSessionLocal
 from app.core.logging_config import setup_logging
 from app.ingestion.orchestrator import IngestOrchestrator
+from app.services.ingestion_service import run_ingestion
 from app.services.retention_service import RetentionService
 from app.worker.celery_app import celery_app
 
@@ -21,48 +22,10 @@ def _run_async(coro):
 @celery_app.task(name="app.worker.tasks.ingest_all_feeds")
 def ingest_all_feeds() -> dict:
     setup_logging()
-
-    redis_client = get_sync_redis()
-    lock_key = "lock:ingest:all"
-    if not redis_client.set(lock_key, "true", ex=1800, nx=True):
-        logger.warning("Ingest all feeds task is already running. Skipping execution.")
-        return {"status": "skipped", "reason": "Already running"}
-
-    try:
-        async def _run() -> dict:
-            async with AsyncSessionLocal() as session:
-                orchestrator = IngestOrchestrator(session)
-                results = await orchestrator.run_all()
-                return {
-                    "feeds_processed": len(results),
-                    "saved": sum(result.saved for result in results),
-                    "updated": sum(result.updated for result in results),
-                    "embedded": sum(result.embedded for result in results),
-                    "errors": sum(len(result.errors) for result in results),
-                }
-
-        logger.info("Scheduled ingest task started")
-        payload = _run_async(_run())
-        logger.info("Scheduled ingest task complete payload=%s", payload)
-
-        # Publish updates event if new articles saved/embedded
-        if payload.get("saved", 0) > 0 or payload.get("embedded", 0) > 0:
-            try:
-                update_msg = {
-                    "event": "news_updated",
-                    "saved": payload.get("saved", 0),
-                    "embedded": payload.get("embedded", 0),
-                    "source": "all",
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-                redis_client.publish("news:updates", json.dumps(update_msg))
-                logger.info("Published news:updates event to Redis")
-            except Exception as pub_err:
-                logger.error("Failed to publish news update to Redis: %s", pub_err)
-
-        return payload
-    finally:
-        redis_client.delete(lock_key)
+    logger.info("Scheduled ingest task started (Celery)")
+    payload = _run_async(run_ingestion())
+    logger.info("Scheduled ingest task complete payload=%s", payload)
+    return payload
 
 
 @celery_app.task(name="app.worker.tasks.ingest_one_feed")

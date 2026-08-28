@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from app.core.admin_auth import get_current_admin
 from app.models.admin import Admin
+from app.services.ingestion_service import run_ingestion
 
 logger = logging.getLogger(__name__)
 
@@ -14,14 +15,8 @@ router = APIRouter(prefix="/admin/ingest", tags=["admin-ingest"])
 async def run_ingest_all(
     _: Admin = Depends(get_current_admin),
 ):
-    logger.info("Admin ingest all requested - dispatching to Celery background task")
-    from app.worker.tasks import ingest_all_feeds
-    task = ingest_all_feeds.delay()
-    return {
-        "status": "queued",
-        "task_id": task.id,
-        "message": "Global feed ingestion has been queued in the background worker."
-    }
+    logger.info("Admin ingest all requested - running synchronously")
+    return await run_ingestion()
 
 
 @router.post("/run/{source_id}")
