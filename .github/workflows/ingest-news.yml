@@ -16,7 +16,7 @@ jobs:
       - name: Trigger News Ingestion
         run: |
           curl --fail-with-body \
-            --max-time 600 \
+            --max-time 1800 \
             -X POST \
             "${{ secrets.INGEST_API_URL }}" \
             -H "Content-Type: application/json" \
