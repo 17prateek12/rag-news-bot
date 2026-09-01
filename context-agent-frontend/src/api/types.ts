@@ -33,10 +33,9 @@ export interface User {
   email: string
 }
 
-export interface AuthResponse {
-  access_token: string
-  token_type: string
-}
+// H-2: After switching to httpOnly cookies, login/register returns the User directly.
+// The JWT is set as an httpOnly cookie by the server and never sent in the response body.
+export type AuthResponse = User
 
 export interface TrendingEntityResponse {
   id: string
@@ -110,6 +109,7 @@ export interface ChatSendResponse {
 }
 
 export interface ApiError {
+  detail?: string
   error?: {
     code?: string
     message?: string
