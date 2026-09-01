@@ -24,3 +24,9 @@ class UserRepository:
     async def count(self) -> int:
         result = await self._session.scalar(select(func.count()).select_from(User))
         return int(result or 0)
+
+    async def update_password(self, user: User, new_hashed_password: str) -> None:
+        user.hashed_password = new_hashed_password
+        self._session.add(user)
+        await self._session.commit()
+        await self._session.refresh(user)

@@ -7,6 +7,7 @@ from app.api.routes.admin.articles import router as admin_articles_router
 from app.api.routes.admin.auth import router as admin_auth_router
 from app.api.routes.admin.categories import router as admin_categories_router
 from app.api.routes.admin.debug import router as admin_debug_router
+from app.api.routes.admin.digests import router as admin_digests_router
 from app.api.routes.admin.ingest import router as admin_ingest_router
 from app.api.routes.admin.maintenance import router as admin_maintenance_router
 from app.api.routes.admin.rss_sources import router as admin_rss_sources_router
@@ -15,11 +16,13 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.articles import router as articles_router
 from app.api.routes.categories import router as categories_router
+from app.api.routes.digests import router as digests_router
 from app.api.routes.health import router as health_router
 from app.api.routes.rss_sources import router as rss_sources_router
 from app.api.routes.search import router as search_router
 from app.api.routes.speech import router as speech_router
 from app.api.routes.trending import router as trending_router
+from app.api.routes.watches import router as watches_router
 from app.api.routes.ws import router as ws_router, redis_updates_listener
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging_config import setup_logging
@@ -60,7 +63,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Public (no auth)
+# Public (no auth / user auth)
 app.include_router(health_router)
 app.include_router(articles_router)
 app.include_router(categories_router)
@@ -71,6 +74,8 @@ app.include_router(agent_router)
 app.include_router(auth_router)
 app.include_router(speech_router)
 app.include_router(chat_router)
+app.include_router(watches_router)
+app.include_router(digests_router)
 app.include_router(ws_router)
 
 # Admin-only (writes + ingest + ops)
@@ -79,5 +84,6 @@ app.include_router(admin_articles_router)
 app.include_router(admin_categories_router)
 app.include_router(admin_rss_sources_router)
 app.include_router(admin_ingest_router)
+app.include_router(admin_digests_router)
 app.include_router(admin_maintenance_router)
 app.include_router(admin_debug_router)

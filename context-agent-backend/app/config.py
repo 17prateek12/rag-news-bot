@@ -2,9 +2,6 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-DEFAULT_JWT_SECRET = "change-me-jwt-secret"
-
-
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -81,8 +78,8 @@ class Settings(BaseSettings):
     web_fallback_cache_ttl_seconds: int
 
     # Ingest / retention scheduler (Celery)
-    celery_broker_url: str = ""
-    celery_result_backend: str = ""
+    celery_broker_url: str
+    celery_result_backend: str
     scheduler_enabled: bool
     retention_cron_hour: int
     retention_cron_minute: int
@@ -91,23 +88,35 @@ class Settings(BaseSettings):
     api_host: str
     api_port: int
     log_level: str
+    frontend_url: str
+
+    # SMTP Email Configuration (Google SMTP / Gmail)
+    smtp_host: str
+    smtp_port: int
+    smtp_mail_username: str
+    smtp_mail_password: str
+    smtp_from_email: str = ""
 
     # Admin auth
     admin_email: str
     admin_password: str
     admin_api_key: str
-    jwt_secret: str = DEFAULT_JWT_SECRET
+    jwt_secret: str
     jwt_algorithm: str
     jwt_expire_minutes: int
 
-    @model_validator(mode="after")
-    def adjust_redis_url(self) -> 'Settings':
-        for attr in ["redis_url", "celery_broker_url", "celery_result_backend"]:
-            val = getattr(self, attr, "")
-            if val and val.startswith("rediss://") and "ssl_cert_reqs" not in val:
-                separator = "&" if "?" in val else "?"
-                setattr(self, attr, f"{val}{separator}ssl_cert_reqs=CERT_NONE")
-        return self
+    @property
+    def effective_from_email(self) -> str:
+        return self.smtp_from_email or self.smtp_mail_username
+
+    # @model_validator(mode="after")
+    # def adjust_redis_url(self) -> 'Settings':
+    #     for attr in ["redis_url", "celery_broker_url", "celery_result_backend"]:
+    #         val = getattr(self, attr, "")
+    #         if val and val.startswith("rediss://") and "ssl_cert_reqs" not in val:
+    #             separator = "&" if "?" in val else "?"
+    #             setattr(self, attr, f"{val}{separator}ssl_cert_reqs=CERT_NONE")
+    #     return self
 
 
 settings = Settings()

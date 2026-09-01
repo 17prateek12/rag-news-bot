@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { dedupeSearchHits } from '../lib/trendingFilters'
@@ -6,8 +7,12 @@ import { TrendingTopicList } from '../components/trending/TrendingTopicList'
 import { TrendingArticleList } from '../components/trending/TrendingArticleList'
 
 export function TrendingPage() {
-  const [activeTab, setActiveTab] = useState<'news' | 'searches'>('news')
-  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const entityParam = searchParams.get('entity')
+  const tabParam = (searchParams.get('tab') as 'news' | 'searches') || 'news'
+
+  const [activeTab, setActiveTab] = useState<'news' | 'searches'>(tabParam)
+  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(entityParam)
 
   // Fetch trending list using React Query (cached)
   const { data: trendingData, isLoading: loadingList } = useQuery({
@@ -22,15 +27,27 @@ export function TrendingPage() {
   // Find the selected entity object from the active list
   const selectedEntity = currentList.find((e) => e.id === selectedEntityId) || null
 
-  // Auto-select first item when active tab changes or trending list loads
+  // Update activeTab if tabParam changes in URL
+  useEffect(() => {
+    if (tabParam && (tabParam === 'news' || tabParam === 'searches')) {
+      setActiveTab(tabParam)
+    }
+  }, [tabParam])
+
+  // Select entity from URL query param or fallback to first item in list
   useEffect(() => {
     const list = activeTab === 'news' ? trendingNews : trendingSearches
-    if (list.length > 0) {
-      setSelectedEntityId(list[0].id)
-    } else {
+    if (list.length === 0) {
       setSelectedEntityId(null)
+      return
     }
-  }, [activeTab, trendingNews, trendingSearches])
+
+    if (entityParam && list.some((e) => e.id === entityParam)) {
+      setSelectedEntityId(entityParam)
+    } else if (!selectedEntityId || !list.some((e) => e.id === selectedEntityId)) {
+      setSelectedEntityId(list[0].id)
+    }
+  }, [activeTab, trendingNews, trendingSearches, entityParam, selectedEntityId])
 
   // Fetch backing articles for selected entity using React Query (cached)
   const { data: articlesData, isLoading: loadingArticles } = useQuery({
@@ -40,6 +57,16 @@ export function TrendingPage() {
   })
 
   const searchHits = articlesData ? dedupeSearchHits(articlesData.results) : []
+
+  const handleSelectEntity = (entityId: string) => {
+    setSelectedEntityId(entityId)
+    setSearchParams({ entity: entityId, tab: activeTab })
+  }
+
+  const handleTabChange = (tab: 'news' | 'searches') => {
+    setActiveTab(tab)
+    setSearchParams({ tab })
+  }
 
   return (
     <div className="page trending-page">
@@ -51,10 +78,10 @@ export function TrendingPage() {
       <div className="trending-layout">
         <TrendingTopicList
           activeTab={activeTab}
-          onTabChange={setActiveTab}
+          onTabChange={handleTabChange}
           topics={currentList}
           selectedEntityId={selectedEntityId || undefined}
-          onSelectEntity={(entity) => setSelectedEntityId(entity.id)}
+          onSelectEntity={(entity) => handleSelectEntity(entity.id)}
           loading={loadingList}
         />
 

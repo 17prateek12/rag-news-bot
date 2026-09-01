@@ -7,6 +7,7 @@ from app.config import settings
 
 ADMIN_TOKEN_TYPE = "admin_session"
 USER_TOKEN_TYPE = "user_session"
+PASSWORD_RESET_TOKEN_TYPE = "password_reset"
 
 
 def hash_password(password: str) -> str:
@@ -50,5 +51,22 @@ def create_user_token(email: str) -> str:
 def decode_user_token(token: str) -> dict:
     payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
     if payload.get("token_type") != USER_TOKEN_TYPE:
+        raise JWTError("Invalid token type")
+    return payload
+
+
+def create_password_reset_token(email: str, expire_minutes: int = 15) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(minutes=expire_minutes)
+    payload = {
+        "sub": email.lower().strip(),
+        "token_type": PASSWORD_RESET_TOKEN_TYPE,
+        "exp": expire,
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def decode_password_reset_token(token: str) -> dict:
+    payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    if payload.get("token_type") != PASSWORD_RESET_TOKEN_TYPE:
         raise JWTError("Invalid token type")
     return payload

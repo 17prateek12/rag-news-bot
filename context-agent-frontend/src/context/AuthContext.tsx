@@ -10,16 +10,26 @@ import {
 import { api, getToken, setToken } from '../api/client'
 import type { User } from '../api/types'
 
+export type AuthMode =
+  | 'login'
+  | 'signup'
+  | 'forgot-password'
+  | 'reset-password'
+  | 'change-password'
+
 interface AuthContextValue {
   user: User | null
   loading: boolean
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string) => Promise<void>
+  changePassword: (current_password: string, new_password: string) => Promise<string>
+  forgotPassword: (email: string) => Promise<string>
+  resetPassword: (token: string, new_password: string) => Promise<string>
   logout: () => void
-  openAuth: (mode?: 'login' | 'signup') => void
+  openAuth: (mode?: AuthMode) => void
   closeAuth: () => void
   authOpen: boolean
-  authMode: 'login' | 'signup'
+  authMode: AuthMode
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -28,7 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [authOpen, setAuthOpen] = useState(false)
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
+  const [authMode, setAuthMode] = useState<AuthMode>('login')
 
   const refreshUser = useCallback(async () => {
     if (!getToken()) {
@@ -67,6 +77,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthOpen(false)
   }
 
+  const changePassword = async (current_password: string, new_password: string) => {
+    const res = await api.changePassword(current_password, new_password)
+    return res.message
+  }
+
+  const forgotPassword = async (email: string) => {
+    const res = await api.forgotPassword(email)
+    return res.message
+  }
+
+  const resetPassword = async (token: string, new_password: string) => {
+    const res = await api.resetPassword(token, new_password)
+    return res.message
+  }
+
   const logout = () => {
     setToken(null)
     setUser(null)
@@ -78,8 +103,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       login,
       register,
+      changePassword,
+      forgotPassword,
+      resetPassword,
       logout,
-      openAuth: (mode: 'login' | 'signup' = 'login') => {
+      openAuth: (mode: AuthMode = 'login') => {
         setAuthMode(mode)
         setAuthOpen(true)
       },

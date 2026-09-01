@@ -8,6 +8,7 @@ from app.models.rss_source import RssSource
 from app.models.source import Source
 from app.models.trending import TrendingEntity, TrendingNewsCount, TrendingQueryCount
 from app.models.user import User
+from app.models.watch import Digest, Watch
 
 __all__ = [
     "Base",
@@ -23,4 +24,6 @@ __all__ = [
     "TrendingEntity",
     "TrendingNewsCount",
     "TrendingQueryCount",
+    "Watch",
+    "Digest",
 ]

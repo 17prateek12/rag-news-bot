@@ -1,11 +1,15 @@
 import { NavLink } from 'react-router-dom'
 import {
+  Bell,
   Flame,
   Home,
+  KeyRound,
   LogIn,
   LogOut,
   MessageSquare,
   Moon,
+  Newspaper,
+  Sparkles,
   Sun,
   UserPlus,
   X,
@@ -39,8 +43,17 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           <NavLink to="/" className={navClass} onClick={onClose}>
             <Home size={18} /> Home
           </NavLink>
+          <NavLink to="/articles" className={navClass} onClick={onClose}>
+            <Newspaper size={18} /> All Articles
+          </NavLink>
+          <NavLink to="/briefs" className={navClass} onClick={onClose}>
+            <Sparkles size={18} /> Daily Briefs
+          </NavLink>
           <NavLink to="/trending" className={navClass} onClick={onClose}>
             <Flame size={18} /> Trending
+          </NavLink>
+          <NavLink to="/watches" className={navClass} onClick={onClose}>
+            <Bell size={18} /> My Watches
           </NavLink>
           <NavLink to="/chat" className={navClass} onClick={onClose}>
             <MessageSquare size={18} /> Chat
@@ -54,6 +67,16 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           {user ? (
             <>
               <div className="sidebar-user">{user.email}</div>
+              <button
+                type="button"
+                className="sidebar-link"
+                onClick={() => {
+                  openAuth('change-password')
+                  onClose()
+                }}
+              >
+                <KeyRound size={18} /> Change password
+              </button>
               <button type="button" className="sidebar-link" onClick={logout}>
                 <LogOut size={18} /> Log out
               </button>

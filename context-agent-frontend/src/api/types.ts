@@ -115,3 +115,35 @@ export interface ApiError {
     message?: string
   }
 }
+
+export interface Watch {
+  id: string
+  user_id: string
+  keyword: string
+  entity_id: string | null
+  is_active: boolean
+  created_at: string
+}
+
+export interface DigestArticle {
+  id: string
+  title: string
+  url: string
+  source?: string | null
+  published_at?: string | null
+}
+
+export interface Digest {
+  id: string
+  watch_id: string
+  keyword: string
+  digest_date: string
+  summary_text: string
+  article_ids: string[]
+  articles: DigestArticle[]
+  created_at: string
+}
+
+export interface PasswordActionResponse {
+  message: string
+}

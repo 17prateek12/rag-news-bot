@@ -6,9 +6,12 @@ import type {
   ChatMessage,
   ChatSendResponse,
   ChatSession,
+  Digest,
   HybridSearchResponse,
+  PasswordActionResponse,
   TrendingResponse,
   User,
+  Watch,
 } from './types'
 
 export const API_BASE =
@@ -122,4 +125,33 @@ export const api = {
   },
   deleteChatSession: (sessionId: string) =>
     request<void>(`/chat/sessions/${sessionId}`, { method: 'DELETE' }, true),
+
+  listWatches: () => request<Watch[]>('/watches', {}, true),
+  createWatch: (keyword: string) =>
+    request<Watch>(
+      '/watches',
+      { method: 'POST', body: JSON.stringify({ keyword }) },
+      true,
+    ),
+  deleteWatch: (watchId: string) =>
+    request<void>(`/watches/${watchId}`, { method: 'DELETE' }, true),
+
+  listDigests: (days = 7) => request<Digest[]>(`/digests?days=${days}`, {}, true),
+
+  forgotPassword: (email: string) =>
+    request<PasswordActionResponse>(
+      '/auth/forgot-password',
+      { method: 'POST', body: JSON.stringify({ email }) },
+    ),
+  resetPassword: (token: string, new_password: string) =>
+    request<PasswordActionResponse>(
+      '/auth/reset-password',
+      { method: 'POST', body: JSON.stringify({ token, new_password }) },
+    ),
+  changePassword: (current_password: string, new_password: string) =>
+    request<PasswordActionResponse>(
+      '/auth/change-password',
+      { method: 'POST', body: JSON.stringify({ current_password, new_password }) },
+      true,
+    ),
 }

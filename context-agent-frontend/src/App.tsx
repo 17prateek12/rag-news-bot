@@ -6,8 +6,12 @@ import { AuthProvider } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
 
 const HomePage = lazy(() => import('./pages/HomePage').then(module => ({ default: module.HomePage })))
+const ArticlesPage = lazy(() => import('./pages/ArticlesPage').then(module => ({ default: module.ArticlesPage })))
+const BriefsPage = lazy(() => import('./pages/BriefsPage').then(module => ({ default: module.BriefsPage })))
 const TrendingPage = lazy(() => import('./pages/TrendingPage').then(module => ({ default: module.TrendingPage })))
 const ChatPage = lazy(() => import('./pages/ChatPage').then(module => ({ default: module.ChatPage })))
+const WatchesPage = lazy(() => import('./pages/WatchesPage').then(module => ({ default: module.WatchesPage })))
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage').then(module => ({ default: module.ResetPasswordPage })))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -28,7 +32,11 @@ export default function App() {
               <Routes>
                 <Route element={<AppLayout />}>
                   <Route index element={<HomePage />} />
+                  <Route path="articles" element={<ArticlesPage />} />
+                  <Route path="briefs" element={<BriefsPage />} />
                   <Route path="trending" element={<TrendingPage />} />
+                  <Route path="watches" element={<WatchesPage />} />
+                  <Route path="reset-password" element={<ResetPasswordPage />} />
                   <Route path="chat" element={<ChatPage />} />
                   <Route path="chat/:sessionId" element={<ChatPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />

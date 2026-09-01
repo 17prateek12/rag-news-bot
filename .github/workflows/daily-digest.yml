@@ -1,0 +1,31 @@
+name: Daily Topic Digests
+
+on:
+  schedule:
+    # Run daily at 06:30 UTC
+    - cron: "30 6 * * *"
+
+  # Enable manual run via Actions tab
+  workflow_dispatch:
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Daily Digest Run
+        run: |
+          TARGET_URL="${{ secrets.DIGEST_API_URL }}"
+          if [ -z "$TARGET_URL" ]; then
+            # Derive from INGEST_API_URL by replacing /ingest/run with /digests/run
+            TARGET_URL="${{ secrets.INGEST_API_URL }}"
+            TARGET_URL="${TARGET_URL%/ingest/run}/digests/run"
+          fi
+          
+          curl --fail-with-body \
+            --max-time 600 \
+            -X POST \
+            "$TARGET_URL" \
+            -H "Content-Type: application/json" \
+            -H "Content-Length: 0" \
+            -H "X-Admin-Api-Key: ${{ secrets.ADMIN_API_KEY }}"
