@@ -5,6 +5,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import redis.asyncio as aioredis
 
 from app.config import settings
+from app.core.security import decode_user_token
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class ConnectionManager:
             except Exception as e:
                 logger.warning("Failed to send message to connection, queueing for removal: %s", e)
                 disconnected.append(connection)
-        
+
         # Clean up any dead connections we failed to write to
         for conn in disconnected:
             self.disconnect(conn)
@@ -45,6 +46,26 @@ manager = ConnectionManager()
 
 @router.websocket("/news")
 async def websocket_news_endpoint(websocket: WebSocket):
+    """
+    Real-time news broadcast channel.
+    M-3: Requires a valid user session (httpOnly cookie) to connect.
+    This prevents anonymous clients from subscribing to broadcasts and
+    provides the infrastructure for future user-segmented notifications.
+    """
+    # M-3: Validate the httpOnly cookie before accepting the connection
+    access_token = websocket.cookies.get("access_token")
+    if not access_token:
+        logger.warning("WebSocket connection rejected: no access_token cookie")
+        await websocket.close(code=4001, reason="Authentication required")
+        return
+
+    try:
+        decode_user_token(access_token)
+    except Exception:
+        logger.warning("WebSocket connection rejected: invalid or expired token")
+        await websocket.close(code=4001, reason="Invalid or expired token")
+        return
+
     await manager.connect(websocket)
     try:
         while True:
@@ -66,7 +87,7 @@ async def redis_updates_listener():
             pubsub = client.pubsub()
             await pubsub.subscribe("news:updates")
             logger.info("Subscribed to Redis 'news:updates' channel successfully")
-            
+
             async for message in pubsub.listen():
                 if message and message.get("type") == "message":
                     raw_data = message.get("data")

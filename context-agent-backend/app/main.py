@@ -24,6 +24,7 @@ from app.api.routes.speech import router as speech_router
 from app.api.routes.trending import router as trending_router
 from app.api.routes.watches import router as watches_router
 from app.api.routes.ws import router as ws_router, redis_updates_listener
+from app.config import settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging_config import setup_logging
 from app.core.request_logging import RequestLoggingMiddleware
@@ -57,8 +58,10 @@ register_exception_handlers(app)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    # H-1: Restrict to the configured frontend origin instead of wildcard "*"
+    # H-2: allow_credentials=True is required for the browser to send httpOnly cookies
+    allow_origins=[settings.frontend_url],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

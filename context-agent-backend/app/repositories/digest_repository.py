@@ -54,15 +54,16 @@ class DigestRepository:
         return digest, True
 
     async def list_recent_for_user(
-        self, user_id: UUID, days: int = 7
+        self, user_id: UUID, days: int | None = None
     ) -> list[dict]:
-        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).date()
+        # Since only the single latest digest per watch is preserved in the DB,
+        # we fetch all active watch digests without an artificial date cutoff filter.
+        # This prevents digests from silently vanishing if the daily cron fails.
         stmt = (
             select(Digest)
             .join(Watch, Digest.watch_id == Watch.id)
             .where(
                 Digest.user_id == user_id,
-                Digest.digest_date >= cutoff_date,
             )
             .options(selectinload(Digest.watch))
             .order_by(Digest.digest_date.desc(), Digest.created_at.desc())

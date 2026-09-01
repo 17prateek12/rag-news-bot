@@ -1,4 +1,5 @@
 import { type FormEvent, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { CheckCircle2, KeyRound, X } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 
@@ -115,7 +116,7 @@ export function AuthModal() {
     }
   }
 
-  return (
+  return createPortal(
     <div className="modal-backdrop" onClick={closeAuth}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <button
@@ -364,6 +365,7 @@ export function AuthModal() {
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

@@ -55,15 +55,15 @@ async def find_matching_articles(
             article_entities, Article.id == article_entities.c.article_id
         ).where(article_entities.c.entity_id == entity_id)
     else:
-        # Note: ILIKE pattern matching on title/cleaned_text is suitable for portfolio
-        # and moderate news corpus scale. At high scale (millions of articles), a pg_trgm
-        # or dedicated full-text search GIN index on cleaned_text should be added.
-        clean_kw = keyword.strip()
+        # M-2: Escape SQL ILIKE wildcard characters (% and _) in the keyword to prevent
+        # a user-supplied keyword like "%" from matching every article, or "_" from acting
+        # as a single-character wildcard that degrades into a slow regex scan.
+        clean_kw = keyword.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{clean_kw}%"
         stmt = stmt.where(
             or_(
-                Article.title.ilike(pattern),
-                Article.cleaned_text.ilike(pattern),
+                Article.title.ilike(pattern, escape="\\"),
+                Article.cleaned_text.ilike(pattern, escape="\\"),
             )
         )
 
@@ -329,3 +329,5 @@ class DigestService:
 
         finally:
             redis_client.delete(lock_key)
+
+

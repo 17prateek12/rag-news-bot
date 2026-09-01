@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.database import get_db
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.core.user_auth import get_current_user
 from app.models.user import User
 from app.repositories.chat_repository import ChatRepository
@@ -19,6 +20,21 @@ from app.schemas.chat import (
 from app.services.chat_service import ChatService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+# H-5: Reuse the same audio allowlist from speech.py
+_ALLOWED_AUDIO_TYPES = {
+    "audio/webm",
+    "audio/ogg",
+    "audio/mpeg",
+    "audio/mp4",
+    "audio/wav",
+    "audio/wave",
+    "audio/x-wav",
+    "audio/mp3",
+    "audio/aac",
+    "audio/flac",
+    "video/webm",
+}
 
 
 @router.post("/sessions", response_model=ChatSessionRead, status_code=status.HTTP_201_CREATED)
@@ -114,6 +130,23 @@ async def send_voice_message(
     db: AsyncSession = Depends(get_db),
 ):
     audio_bytes = await audio.read()
+
+    # H-5: Validate MIME type against allowlist
+    content_type = (audio.content_type or "").lower().split(";")[0].strip()
+    if content_type not in _ALLOWED_AUDIO_TYPES:
+        raise ValidationError(
+            f"Unsupported audio format '{content_type}'. "
+            f"Accepted: {', '.join(sorted(_ALLOWED_AUDIO_TYPES))}"
+        )
+
+    # H-5: Enforce maximum audio file size from config
+    max_bytes = settings.stt_max_audio_bytes
+    if len(audio_bytes) > max_bytes:
+        raise ValidationError(
+            f"Audio file too large ({len(audio_bytes):,} bytes). "
+            f"Maximum allowed: {max_bytes:,} bytes."
+        )
+
     service = ChatService(db)
     return await service.send_voice_message(
         current_user,

@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { api, getToken, setToken } from '../api/client'
+import { api } from '../api/client'
 import type { User } from '../api/types'
 
 export type AuthMode =
@@ -25,7 +25,7 @@ interface AuthContextValue {
   changePassword: (current_password: string, new_password: string) => Promise<string>
   forgotPassword: (email: string) => Promise<string>
   resetPassword: (token: string, new_password: string) => Promise<string>
-  logout: () => void
+  logout: () => Promise<void>
   openAuth: (mode?: AuthMode) => void
   closeAuth: () => void
   authOpen: boolean
@@ -40,17 +40,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authOpen, setAuthOpen] = useState(false)
   const [authMode, setAuthMode] = useState<AuthMode>('login')
 
+  // H-2: No localStorage check — just always call /auth/me.
+  // The httpOnly cookie is sent automatically by the browser; if the server
+  // returns 401, the user is not logged in. This is the authoritative check.
   const refreshUser = useCallback(async () => {
-    if (!getToken()) {
-      setUser(null)
-      setLoading(false)
-      return
-    }
     try {
       const me = await api.me()
       setUser(me)
     } catch {
-      setToken(null)
       setUser(null)
     } finally {
       setLoading(false)
@@ -61,18 +58,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refreshUser()
   }, [refreshUser])
 
+  // H-2: login now receives the User directly from the server response;
+  // the JWT is set as an httpOnly cookie by the server, never exposed to JS.
   const login = async (email: string, password: string) => {
-    const res = await api.login(email, password)
-    setToken(res.access_token)
-    const me = await api.me()
+    const me = await api.login(email, password)
     setUser(me)
     setAuthOpen(false)
   }
 
   const register = async (email: string, password: string) => {
-    const res = await api.register(email, password)
-    setToken(res.access_token)
-    const me = await api.me()
+    const me = await api.register(email, password)
     setUser(me)
     setAuthOpen(false)
   }
@@ -92,8 +87,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return res.message
   }
 
-  const logout = () => {
-    setToken(null)
+  // H-2: logout calls the server to clear the httpOnly cookie
+  const logout = async () => {
+    try {
+      await api.logout()
+    } catch {
+      // Even if the server call fails, clear local state
+    }
     setUser(null)
   }
 

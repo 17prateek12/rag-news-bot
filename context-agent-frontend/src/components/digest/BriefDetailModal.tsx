@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { X, ExternalLink, Newspaper, Calendar, Sparkles } from 'lucide-react'
 import type { Digest, DigestArticle } from '../../api/types'
 
@@ -35,7 +36,7 @@ export function BriefDetailModal({ digest, onClose }: BriefDetailModalProps) {
     })
   }
 
-  return (
+  return createPortal(
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-card digest-detail-modal" onClick={(e) => e.stopPropagation()}>
         <button
@@ -108,6 +109,7 @@ export function BriefDetailModal({ digest, onClose }: BriefDetailModalProps) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

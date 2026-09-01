@@ -74,8 +74,9 @@ class TestWatchesRoutes(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Maximum watch limit", response.json()["error"]["message"])
 
+    @patch("app.api.routes.watches.check_watch_update_rate_limit")
     @patch("app.api.routes.watches.WatchRepository")
-    def test_create_watch_duplicate_keyword(self, mock_repo_cls):
+    def test_create_watch_duplicate_keyword(self, mock_repo_cls, mock_rate_limit):
         mock_repo = MagicMock()
         mock_repo.count_for_user = AsyncMock(return_value=1)
         mock_repo.get_by_user_and_keyword = AsyncMock(return_value=MagicMock())  # already exists
@@ -84,6 +85,19 @@ class TestWatchesRoutes(unittest.TestCase):
         response = self.client.post("/watches", json={"keyword": "ISRO"})
         self.assertEqual(response.status_code, 400)
         self.assertIn("already watching", response.json()["error"]["message"])
+
+    @patch("app.api.routes.watches.check_watch_update_rate_limit")
+    def test_create_watch_rate_limit_exceeded(self, mock_rate_limit):
+        from fastapi import HTTPException, status
+        mock_rate_limit.side_effect = HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Daily watch modification limit reached (5 changes allowed per day). Please try again tomorrow.",
+        )
+
+        response = self.client.post("/watches", json={"keyword": "Tesla"})
+        self.assertEqual(response.status_code, 429)
+        self.assertIn("Daily watch modification limit reached", response.json()["error"]["message"])
+
 
     @patch("app.api.routes.watches.WatchRepository")
     def test_list_watches(self, mock_repo_cls):

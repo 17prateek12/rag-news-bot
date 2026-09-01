@@ -1,14 +1,16 @@
 import { useQuery } from '@tanstack/react-query'
-import { api, getToken } from '../api/client'
+import { api } from '../api/client'
+import { useAuth } from '../context/AuthContext'
 import type { Digest } from '../api/types'
 
 export function useDigests(days: number = 7) {
-  const hasAuthToken = Boolean(getToken())
+  const { user } = useAuth()
+  const isAuthenticated = Boolean(user)
 
   const { data = [], isLoading, isError, error, refetch } = useQuery<Digest[]>({
     queryKey: ['digests', days],
     queryFn: () => api.listDigests(days),
-    enabled: hasAuthToken,
+    enabled: isAuthenticated,
     staleTime: 60000 * 5, // 5 minutes
   })
 
@@ -18,8 +20,8 @@ export function useDigests(days: number = 7) {
     digests: data,
     spotlightDigest,
     hasBriefs: data.length > 0,
-    isAuthenticated: hasAuthToken,
-    isLoading: hasAuthToken ? isLoading : false,
+    isAuthenticated,
+    isLoading: isAuthenticated ? isLoading : false,
     isError,
     error,
     refetch,

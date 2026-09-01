@@ -1,6 +1,5 @@
 import type {
   ApiError,
-  PaginatedArticlesResponse,
   AuthResponse,
   Category,
   ChatMessage,
@@ -8,6 +7,7 @@ import type {
   ChatSession,
   Digest,
   HybridSearchResponse,
+  PaginatedArticlesResponse,
   PasswordActionResponse,
   TrendingResponse,
   User,
@@ -17,37 +17,29 @@ import type {
 export const API_BASE =
   import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? '/api' : '')
 
-const TOKEN_KEY = 'context_agent_token'
-
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
-}
-
-export function setToken(token: string | null) {
-  if (token) localStorage.setItem(TOKEN_KEY, token)
-  else localStorage.removeItem(TOKEN_KEY)
-}
-
+// H-2: All requests use credentials: 'include' so the browser automatically sends
+// the httpOnly 'access_token' cookie set by the server on login/register.
+// The token is never stored in localStorage or accessible to JavaScript.
 async function request<T>(
   path: string,
   options: RequestInit = {},
-  auth = false,
 ): Promise<T> {
   const headers = new Headers(options.headers)
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
   }
-  if (auth) {
-    const token = getToken()
-    if (token) headers.set('Authorization', `Bearer ${token}`)
-  }
 
-  const response = await fetch(`${API_BASE}${path}`, { ...options, headers })
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers,
+    credentials: 'include', // H-2: always send cookies (httpOnly access_token)
+  })
+
   if (!response.ok) {
     let message = response.statusText
     try {
       const body = (await response.json()) as ApiError
-      message = body.error?.message ?? message
+      message = body.error?.message ?? body.detail ?? message
     } catch {
       /* ignore */
     }
@@ -70,6 +62,7 @@ export const api = {
     return request<PaginatedArticlesResponse>(qs ? `/articles?${qs}` : '/articles')
   },
 
+  // H-2: login and register return the User directly; the JWT is set as an httpOnly cookie by the server
   register: (email: string, password: string) =>
     request<AuthResponse>('/auth/register', {
       method: 'POST',
@@ -82,7 +75,11 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
 
-  me: () => request<User>('/auth/me', {}, true),
+  // H-2: Logout clears the httpOnly cookie on the server side
+  logout: () =>
+    request<void>('/auth/logout', { method: 'POST' }),
+
+  me: () => request<User>('/auth/me'),
 
   hybridSearch: (q: string, limit = 8, topicMatch = false) =>
     request<HybridSearchResponse>(
@@ -98,20 +95,18 @@ export const api = {
   getTrendingArticles: (entityId: string) =>
     request<HybridSearchResponse>(`/trending/entities/${entityId}/articles`),
 
-  listChatSessions: () => request<ChatSession[]>('/chat/sessions', {}, true),
+  listChatSessions: () => request<ChatSession[]>('/chat/sessions'),
   createChatSession: (title?: string) =>
     request<ChatSession>(
       '/chat/sessions',
       { method: 'POST', body: JSON.stringify({ title: title ?? null }) },
-      true,
     ),
   listChatMessages: (sessionId: string) =>
-    request<ChatMessage[]>(`/chat/sessions/${sessionId}/messages`, {}, true),
+    request<ChatMessage[]>(`/chat/sessions/${sessionId}/messages`),
   sendChatMessage: (sessionId: string, query: string, limit = 6) =>
     request<ChatSendResponse>(
       `/chat/sessions/${sessionId}/messages`,
       { method: 'POST', body: JSON.stringify({ query, limit }) },
-      true,
     ),
   sendVoiceMessage: (sessionId: string, audio: Blob, filename: string, limit = 6) => {
     const form = new FormData()
@@ -120,23 +115,21 @@ export const api = {
     return request<ChatSendResponse>(
       `/chat/sessions/${sessionId}/messages/audio`,
       { method: 'POST', body: form },
-      true,
     )
   },
   deleteChatSession: (sessionId: string) =>
-    request<void>(`/chat/sessions/${sessionId}`, { method: 'DELETE' }, true),
+    request<void>(`/chat/sessions/${sessionId}`, { method: 'DELETE' }),
 
-  listWatches: () => request<Watch[]>('/watches', {}, true),
+  listWatches: () => request<Watch[]>('/watches'),
   createWatch: (keyword: string) =>
     request<Watch>(
       '/watches',
       { method: 'POST', body: JSON.stringify({ keyword }) },
-      true,
     ),
   deleteWatch: (watchId: string) =>
-    request<void>(`/watches/${watchId}`, { method: 'DELETE' }, true),
+    request<void>(`/watches/${watchId}`, { method: 'DELETE' }),
 
-  listDigests: (days = 7) => request<Digest[]>(`/digests?days=${days}`, {}, true),
+  listDigests: (days = 7) => request<Digest[]>(`/digests?days=${days}`),
 
   forgotPassword: (email: string) =>
     request<PasswordActionResponse>(
@@ -152,6 +145,5 @@ export const api = {
     request<PasswordActionResponse>(
       '/auth/change-password',
       { method: 'POST', body: JSON.stringify({ current_password, new_password }) },
-      true,
     ),
 }

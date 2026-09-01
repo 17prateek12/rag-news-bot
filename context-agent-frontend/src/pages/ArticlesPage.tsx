@@ -1,128 +1,114 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
-import { api, API_BASE } from '../api/client'
-import type { Category, SearchHit } from '../api/types'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { api } from '../api/client'
+import type { SearchHit } from '../api/types'
 import { ArticleGrid } from '../components/articles/ArticleGrid'
 import { CategoryPills } from '../components/articles/CategoryPills'
 import { SearchResults } from '../components/search/SearchResults'
 
 export function ArticlesPage() {
   const [searchParams] = useSearchParams()
+  const categoryParam = searchParams.get('category')
   const searchQuery = searchParams.get('q') ?? ''
-  const queryClient = useQueryClient()
 
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(categoryParam)
   const [searchResults, setSearchResults] = useState<SearchHit[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchError, setSearchError] = useState('')
 
-  // Connection status for real-time WebSocket updates
-  const [wsConnected, setWsConnected] = useState(false)
-  const observerTarget = useRef<HTMLDivElement | null>(null)
+  const observerTarget = useRef<HTMLDivElement>(null)
 
-  // Fetch Category pills using React Query (cached)
-  const { data: categories = [] } = useQuery<Category[]>({
+  const { data: categories = [] } = useQuery({
     queryKey: ['categories'],
     queryFn: () => api.listCategories(),
   })
 
-  // Fetch Infinite Articles using React Query
   const {
     data,
-    fetchNextPage,
+    isLoading: loading,
     hasNextPage,
     isFetchingNextPage,
-    isLoading: loading,
+    fetchNextPage,
   } = useInfiniteQuery({
     queryKey: ['articles', selectedCategory],
-    queryFn: ({ pageParam = 1 }) =>
-      api.listArticles(pageParam as number, 12, selectedCategory || undefined),
+    queryFn: ({ pageParam = 1 }) => api.listArticles(pageParam, 12, selectedCategory || undefined),
     initialPageParam: 1,
     getNextPageParam: (lastPage, allPages) => {
-      const currentFetched = allPages.reduce((acc, page) => acc + page.articles.length, 0)
-      if (currentFetched >= lastPage.metadata.total || lastPage.articles.length < 12) {
-        return undefined
-      }
-      return allPages.length + 1
+      return lastPage.articles.length === 12 ? allPages.length + 1 : undefined
     },
-    refetchInterval: wsConnected ? false : 30000,
   })
 
   const articles = data ? data.pages.flatMap((page) => page.articles) : []
 
-  // Throttled query invalidator
-  const invalidateRef = useRef<() => void>(undefined)
-  if (!invalidateRef.current) {
-    let lastCall = 0
-    const cooldown = 5000
-    invalidateRef.current = () => {
-      const now = Date.now()
-      if (now - lastCall >= cooldown) {
-        lastCall = now
-        queryClient.invalidateQueries({ queryKey: ['articles'] })
-      }
-    }
-  }
-
-  // Connect to real-time WebSockets
+  // Sync state if URL query param changes
   useEffect(() => {
-    const getWsUrl = () => {
-      let base = API_BASE
-      if (base.startsWith('/')) {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-        const host = window.location.host
-        return `${protocol}//${host}${base}/ws/news`
-      }
-      return base.replace(/^http/, 'ws') + '/ws/news'
-    }
+    setSelectedCategory(categoryParam)
+  }, [categoryParam])
 
-    let socket: WebSocket | null = null
-    let reconnectTimer: number | null = null
-    let isCancelled = false
+  // Real-time WebSocket connection
+  useEffect(() => {
+    let ws: WebSocket | null = null
+    let reconnectTimeout: number | undefined
+    let isMounted = true
 
     const connect = () => {
-      if (isCancelled) return
-      const url = getWsUrl()
-      socket = new WebSocket(url)
+      if (!isMounted) return
 
-      socket.onopen = () => {
-        if (!isCancelled) setWsConnected(true)
-      }
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const wsHost = window.location.host
+      const wsUrl = `${wsProtocol}//${wsHost}/ws/news`
 
-      socket.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data)
-          if (payload.event === 'news_updated') {
-            invalidateRef.current?.()
+      try {
+        ws = new WebSocket(wsUrl)
+
+        ws.onopen = () => {
+          // Connected
+        }
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data)
+            if (data.type === 'new_articles') {
+              // Real-time update
+            }
+          } catch {
+            // Ignore parse error
           }
-        } catch (err) {
-          console.error('Failed to parse WebSocket message:', err)
         }
-      }
 
-      socket.onclose = () => {
-        if (!isCancelled) {
-          setWsConnected(false)
-          reconnectTimer = window.setTimeout(connect, 5000)
+        ws.onerror = () => {
+          // Handled in onclose
         }
-      }
 
-      socket.onerror = () => {
-        socket?.close()
+        ws.onclose = (event) => {
+          // Clean close or auth rejected (4001: unauthorized)
+          if (event.code === 4001) {
+            return
+          }
+          if (isMounted) {
+            reconnectTimeout = window.setTimeout(connect, 5000)
+          }
+        }
+      } catch {
+        if (isMounted) {
+          reconnectTimeout = window.setTimeout(connect, 5000)
+        }
       }
     }
 
     connect()
 
     return () => {
-      isCancelled = true
-      if (socket) socket.close()
-      if (reconnectTimer) clearTimeout(reconnectTimer)
+      isMounted = false
+      clearTimeout(reconnectTimeout)
+      if (ws) {
+        ws.close()
+      }
     }
-  }, [queryClient])
+  }, [])
 
-  // Setup infinite scroll observer sentinel
+  // Infinite scroll observer sentinel
   useEffect(() => {
     if (loading || !hasNextPage) return
 
@@ -177,7 +163,7 @@ export function ArticlesPage() {
 
   return (
     <div className="page articles-page">
-      <section className="hero" style={{ marginBottom: '1.5rem' }}>
+      <section className="hero">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
             <h1>All News Articles</h1>

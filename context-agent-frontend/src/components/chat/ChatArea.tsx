@@ -41,59 +41,65 @@ export function ChatArea({
 
   return (
     <section className="chat-main">
-      <div className="chat-messages">
-        {loading && <div className="empty-state">Loading messages…</div>}
-        {!loading && !messages.length && (
-          <div className="chat-empty">
-            <h3>Ask about the news</h3>
-            <p className="muted">
-              Try “What is happening in Ukraine?” or follow up with “What about the economic impact?”
-            </p>
-          </div>
-        )}
-        {messages.map((message) => (
-          <div key={message.id} className={`chat-bubble ${message.role}`}>
-            <div className="chat-bubble-label">{message.role === 'user' ? 'You' : 'Agent'}</div>
-            <div className="chat-bubble-text">
-              <MarkdownRenderer text={message.text} />
+      <div className="chat-messages-container">
+        <div className="chat-messages-inner">
+          {loading && <div className="empty-state">Loading conversation…</div>}
+          {!loading && messages.length === 0 && (
+            <div className="chat-empty">
+              <h3>Ask About the News</h3>
+              <p className="muted">
+                Ask questions about recent events, track stories, or request background context across all stored articles.
+              </p>
             </div>
-            {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
-              <SourcesList sources={message.sources} />
-            )}
-          </div>
-        ))}
-        {sending && (
-          <div className="chat-bubble assistant pending">
-            <Loader2 className="spin" size={18} /> Thinking…
-          </div>
-        )}
-        <div ref={messagesEndRef} />
+          )}
+          {messages.map((msg) => (
+            <div key={msg.id} className={`chat-bubble ${msg.role}`}>
+              <div className="chat-bubble-label">{msg.role === 'user' ? 'You' : 'Context Agent'}</div>
+              <div className="chat-bubble-text">
+                <MarkdownRenderer text={msg.text} />
+              </div>
+              {msg.sources && msg.sources.length > 0 && <SourcesList sources={msg.sources} />}
+            </div>
+          ))}
+          {sending && (
+            <div className="chat-bubble assistant pending">
+              <div className="chat-bubble-label">Context Agent</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--muted)' }}>
+                <Loader2 size={16} className="spin" />
+                <span>Thinking & synthesizing answer…</span>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
-      {error && <p className="error-text chat-error">{error}</p>}
+      {error && <div className="form-error chat-error">{error}</div>}
 
-      <form className="chat-input-bar" onSubmit={onSendText}>
-        <button
-          type="button"
-          className={`icon-btn mic-btn${recording ? ' recording' : ''}`}
-          onClick={recording ? onStopRecording : onStartRecording}
-          disabled={sending || voiceRemaining <= 0}
-          title={`Voice messages remaining today: ${voiceRemaining}/${voiceLimit}`}
-          aria-label={recording ? 'Stop recording' : 'Record voice message'}
-        >
-          {recording ? <Square size={18} /> : <Mic size={18} />}
-        </button>
-        <input
-          value={input}
-          onChange={(e) => onInputChange(e.target.value)}
-          placeholder="Ask for context, background, or latest updates…"
-          disabled={sending || recording}
-        />
-        <button type="submit" className="btn btn-primary" disabled={sending || recording || !input.trim()}>
-          <Send size={18} />
-        </button>
-      </form>
-      <p className="chat-voice-quota muted">Voice: {voiceRemaining}/{voiceLimit} left today</p>
+      <div className="chat-input-container">
+        <form className="chat-input-bar" onSubmit={onSendText}>
+          <button
+            type="button"
+            className={`icon-btn mic-btn${recording ? ' recording' : ''}`}
+            onClick={recording ? onStopRecording : onStartRecording}
+            disabled={sending || voiceRemaining <= 0}
+            title={`Voice messages remaining today: ${voiceRemaining}/${voiceLimit}`}
+            aria-label={recording ? 'Stop recording' : 'Record voice message'}
+          >
+            {recording ? <Square size={18} /> : <Mic size={18} />}
+          </button>
+          <input
+            value={input}
+            onChange={(e) => onInputChange(e.target.value)}
+            placeholder="Ask for context, background, or latest updates…"
+            disabled={sending || recording}
+          />
+          <button type="submit" className="btn btn-primary" disabled={sending || recording || !input.trim()}>
+            <Send size={18} />
+          </button>
+        </form>
+        <p className="chat-voice-quota muted">Voice: {voiceRemaining}/{voiceLimit} left today</p>
+      </div>
     </section>
   )
 }

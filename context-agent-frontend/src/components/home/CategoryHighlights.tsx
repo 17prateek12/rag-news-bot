@@ -58,10 +58,6 @@ export function CategoryHighlights() {
                   <span className="highlight-time muted">{formatTimeAgo(art.published_at)}</span>
                 </div>
                 <h4 className="highlight-title">{art.title}</h4>
-                <div className="highlight-footer muted">
-                  <span>{art.source || 'News'}</span>
-                  <span className="highlight-read-link">Read ↗</span>
-                </div>
               </a>
             )
           })
@@ -69,11 +65,9 @@ export function CategoryHighlights() {
       </div>
 
       <div className="home-card-footer">
-        <span className="muted text-xs">
-          {totalCount > 0 ? `${totalCount} total articles` : 'Continuous RSS ingest'}
-        </span>
+        <span className="muted text-xs">{totalCount} stories indexed</span>
         <Link to="/articles" className="home-footer-link">
-          Explore All Articles ➔
+          View All Categories ➔
         </Link>
       </div>
     </div>

@@ -68,8 +68,8 @@ export function TrendingTopicList({
 
   // Helper to render heat level badge
   const renderHeatBadge = (level: string) => {
-    const lower = level.toLowerCase()
-    let className = 'heat-active'
+    const lower = (level || '').toLowerCase()
+    let className = 'heat-warm'
     let label = 'Active'
 
     if (lower === 'hot') {
