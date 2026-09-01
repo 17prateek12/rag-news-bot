@@ -129,7 +129,7 @@ export const api = {
   deleteWatch: (watchId: string) =>
     request<void>(`/watches/${watchId}`, { method: 'DELETE' }),
 
-  listDigests: (days = 7) => request<Digest[]>(`/digests?days=${days}`),
+  listDigests: () => request<Digest[]>('/digests'),
 
   forgotPassword: (email: string) =>
     request<PasswordActionResponse>(

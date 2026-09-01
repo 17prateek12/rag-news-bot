@@ -85,8 +85,8 @@ class TestDigestFlow(unittest.IsolatedAsyncioTestCase):
 
         # 3. Setup Digest Repository Mock (initially no digests exist for today)
         mock_digest_repo = MagicMock()
-        mock_digest_repo.get_by_watch_and_date = AsyncMock(return_value=None)
-        mock_digest_repo.create_or_skip = AsyncMock(return_value=(MagicMock(), True))
+        mock_digest_repo.get_existing_watch_ids_for_date = AsyncMock(return_value=set())
+        mock_digest_repo.create_batch_for_watches = AsyncMock(return_value=[MagicMock(), MagicMock()])
         mock_digest_repo_cls.return_value = mock_digest_repo
 
         # 4. Setup Matching Articles Mock
@@ -118,8 +118,8 @@ class TestDigestFlow(unittest.IsolatedAsyncioTestCase):
             # CRITICAL VERIFICATION: LLM was called only ONCE for both users!
             mock_llm.generate.assert_called_once()
 
-            # Both user digests were saved
-            self.assertEqual(mock_digest_repo.create_or_skip.call_count, 2)
+            # Both user digests were saved in a single batch commit
+            mock_digest_repo.create_batch_for_watches.assert_called_once()
             mock_redis.delete.assert_called_once_with("lock:digest:daily")
 
             # Notification emails were dispatched to both users
@@ -163,8 +163,8 @@ class TestDigestFlow(unittest.IsolatedAsyncioTestCase):
         mock_watch_repo_cls.return_value = mock_watch_repo
 
         mock_digest_repo = MagicMock()
-        mock_digest_repo.get_by_watch_and_date = AsyncMock(return_value=None)
-        mock_digest_repo.create_or_skip = AsyncMock(return_value=(MagicMock(), True))
+        mock_digest_repo.get_existing_watch_ids_for_date = AsyncMock(return_value=set())
+        mock_digest_repo.create_batch_for_watches = AsyncMock(return_value=[MagicMock()])
         mock_digest_repo_cls.return_value = mock_digest_repo
 
         # 0 local articles found

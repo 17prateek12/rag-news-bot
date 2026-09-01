@@ -6,7 +6,7 @@ import { DigestCard } from '../digest/DigestCard'
 
 export function SpotlightBriefCard() {
   const { user, openAuth } = useAuth()
-  const { digests, spotlightDigest, isLoading } = useDigests(7)
+  const { digests, spotlightDigest, isLoading } = useDigests()
 
   if (!user) {
     return (

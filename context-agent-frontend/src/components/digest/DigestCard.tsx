@@ -20,27 +20,16 @@ export function DigestCard({ digest, isSpotlight = false, onOpenModal }: DigestC
     }
   }
 
-  // Parse text into executive paragraph and bullet points
-  const parseSummaryContent = (text: string) => {
-    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
-    const paragraphs: string[] = []
-    const bullets: string[] = []
+  // Use structured fields if provided by backend, or fallback to text parser
+  const overview = digest.overview || digest.summary_text.split('\n')[0] || ''
+  const bullets = digest.bullets && digest.bullets.length > 0
+    ? digest.bullets
+    : digest.summary_text
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.startsWith('- ') || l.startsWith('* ') || l.startsWith('• '))
+        .map((l) => l.replace(/^[-*•]\s+/, ''))
 
-    for (const line of lines) {
-      if (line.startsWith('- ') || line.startsWith('* ')) {
-        bullets.push(line.substring(2))
-      } else if (!line.toLowerCase().startsWith('key updates:')) {
-        paragraphs.push(line)
-      }
-    }
-
-    return {
-      paragraph: paragraphs.join(' '),
-      bullets,
-    }
-  }
-
-  const { paragraph, bullets } = parseSummaryContent(digest.summary_text)
   const visibleSources = digest.articles ? digest.articles.slice(0, 2) : []
   const remainingSourcesCount = digest.articles ? Math.max(0, digest.articles.length - 2) : 0
 
@@ -58,7 +47,7 @@ export function DigestCard({ digest, isSpotlight = false, onOpenModal }: DigestC
 
         {/* Card Body with Clamped Content */}
         <div className="compact-card-body">
-          {paragraph && <p className="compact-summary-text">{paragraph}</p>}
+          {overview && <p className="compact-summary-text">{overview}</p>}
 
           {bullets.length > 0 && (
             <div className="compact-bullets-box">

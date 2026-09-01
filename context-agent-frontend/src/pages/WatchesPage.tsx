@@ -122,21 +122,49 @@ export function WatchesPage() {
     setSuccessMessage('')
 
     try {
-      // 1. Process deletions
-      for (const deleteId of stagedDeletes) {
-        await api.deleteWatch(deleteId)
-      }
-
-      // 2. Process additions
-      for (const addKeyword of stagedAdds) {
-        await api.createWatch(addKeyword)
-      }
-
-      setStagedAdds([])
-      setStagedDeletes([])
-      setSuccessMessage(
-        'Watch list updated successfully! Your intelligence briefs will be generated in the next scheduled morning cycle and delivered to your feed and email.'
+      // 1. Process deletions in parallel with Promise.allSettled
+      const deletePromises = stagedDeletes.map((id) =>
+        api
+          .deleteWatch(id)
+          .then(() => ({ id, success: true as const }))
+          .catch((err) => ({ id, success: false as const, error: err }))
       )
+
+      // 2. Process additions in parallel with Promise.allSettled
+      const addPromises = stagedAdds.map((kw) =>
+        api
+          .createWatch(kw)
+          .then(() => ({ keyword: kw, success: true as const }))
+          .catch((err) => ({ keyword: kw, success: false as const, error: err }))
+      )
+
+      const [deleteResults, addResults] = await Promise.all([
+        Promise.all(deletePromises),
+        Promise.all(addPromises),
+      ])
+
+      const successfulDeleteIds = deleteResults.filter((r) => r.success).map((r) => r.id)
+      const failedDeletes = deleteResults.filter((r) => !r.success)
+
+      const successfulAddKeywords = addResults.filter((r) => r.success).map((r) => r.keyword)
+      const failedAdds = addResults.filter((r) => !r.success)
+
+      // Reconcile state: clear only the operations that succeeded, keeping failed items staged for retry
+      setStagedDeletes((prev) => prev.filter((id) => !successfulDeleteIds.includes(id)))
+      setStagedAdds((prev) => prev.filter((kw) => !successfulAddKeywords.includes(kw)))
+
+      if (failedDeletes.length > 0 || failedAdds.length > 0) {
+        const errorMessages = [
+          ...failedDeletes.map((f) => `Failed to remove topic (${(f as any).error?.message || 'error'})`),
+          ...failedAdds.map((f) => `Failed to add "${(f as any).keyword}" (${(f as any).error?.message || 'error'})`),
+        ]
+        setErrorMessage(`Some changes could not be saved: ${errorMessages.join(', ')}`)
+      } else {
+        setSuccessMessage(
+          'Watch list updated successfully! Your intelligence briefs will be generated in the next scheduled morning cycle and delivered to your feed.'
+        )
+      }
+
       await queryClient.invalidateQueries({ queryKey: ['watches'] })
       await queryClient.invalidateQueries({ queryKey: ['digests'] })
     } catch (err: any) {

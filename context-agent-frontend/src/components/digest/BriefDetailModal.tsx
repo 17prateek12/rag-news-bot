@@ -65,7 +65,25 @@ export function BriefDetailModal({ digest, onClose }: BriefDetailModalProps) {
         {/* Modal Body */}
         <div className="digest-modal-body">
           <div className="digest-modal-summary">
-            {renderFullSummary(digest.summary_text)}
+            {digest.overview ? (
+              <>
+                <p className="digest-modal-paragraph">{digest.overview}</p>
+                {digest.bullets && digest.bullets.length > 0 && (
+                  <>
+                    <h4 className="digest-modal-section-title">Key Updates & Findings</h4>
+                    <ul className="digest-modal-bullets-list">
+                      {digest.bullets.map((bullet, idx) => (
+                        <li key={idx} className="digest-modal-bullet">
+                          {bullet}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </>
+            ) : (
+              renderFullSummary(digest.summary_text)
+            )}
           </div>
 
           {digest.articles && digest.articles.length > 0 && (

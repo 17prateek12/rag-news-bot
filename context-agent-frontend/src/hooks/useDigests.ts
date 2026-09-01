@@ -3,13 +3,13 @@ import { api } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import type { Digest } from '../api/types'
 
-export function useDigests(days: number = 7) {
+export function useDigests() {
   const { user } = useAuth()
   const isAuthenticated = Boolean(user)
 
   const { data = [], isLoading, isError, error, refetch } = useQuery<Digest[]>({
-    queryKey: ['digests', days],
-    queryFn: () => api.listDigests(days),
+    queryKey: ['digests'],
+    queryFn: () => api.listDigests(),
     enabled: isAuthenticated,
     staleTime: 60000 * 5, // 5 minutes
   })

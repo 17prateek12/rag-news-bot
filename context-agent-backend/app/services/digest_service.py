@@ -70,6 +70,53 @@ async def find_matching_articles(
     return list((await session.scalars(stmt)).all())
 
 
+def parse_digest_summary(summary_text: str) -> tuple[str, list[str]]:
+    """Parse structured overview and bullet points from LLM summary text.
+    Handles JSON, markdown bullets (-, *, •, 1., etc.), and header variations robustly.
+    """
+    if not summary_text:
+        return "", []
+
+    trimmed = summary_text.strip()
+    if trimmed.startswith("{") and trimmed.endswith("}"):
+        try:
+            import json
+            data = json.loads(trimmed)
+            if isinstance(data, dict):
+                overview = data.get("overview", "")
+                bullets = data.get("bullets", [])
+                if isinstance(bullets, list):
+                    return str(overview).strip(), [str(b).strip() for b in bullets if str(b).strip()]
+        except Exception:
+            pass
+
+    import re
+    lines = [l.strip() for l in summary_text.split("\n") if l.strip()]
+    overview_lines: list[str] = []
+    bullets: list[str] = []
+    in_key_updates = False
+
+    for line in lines:
+        if re.match(r"^(#+\s*)?(key\s+(updates|developments|findings|points|takeaways)|updates|highlights):?$", line, re.IGNORECASE):
+            in_key_updates = True
+            continue
+
+        bullet_match = re.match(r"^[-*•]\s+(.+)$", line) or re.match(r"^\d+[\.\)]\s+(.+)$", line)
+        if bullet_match:
+            bullets.append(bullet_match.group(1).strip())
+        elif in_key_updates:
+            bullets.append(line)
+        else:
+            overview_lines.append(line)
+
+    overview = " ".join(overview_lines).strip()
+    if not overview and bullets:
+        overview = bullets[0]
+        bullets = bullets[1:]
+
+    return overview, bullets
+
+
 def build_digest_prompt(keyword: str, articles: list[Article]) -> str:
     articles_context = []
     for idx, art in enumerate(articles, start=1):
@@ -185,19 +232,19 @@ class DigestService:
                     unique_keywords_checked,
                 )
 
+                # 1. Batch query all existing digests for target_date in a single round-trip
+                all_watch_ids = [w.id for w in active_watches]
+                existing_watch_ids = await digest_repo.get_existing_watch_ids_for_date(
+                    all_watch_ids, target_date
+                )
+
                 for (kw_lower, entity_id), watches in keyword_groups.items():
                     canonical_keyword = watches[0].keyword
 
-                    # Check if all watches in this group already have digests for target_date
-                    pending_watches = []
-                    for w in watches:
-                        existing = await digest_repo.get_by_watch_and_date(
-                            w.id, target_date
-                        )
-                        if existing:
-                            digests_skipped += 1
-                        else:
-                            pending_watches.append(w)
+                    # In-memory check: filter watches that haven't received a digest for target_date yet
+                    pending_watches = [w for w in watches if w.id not in existing_watch_ids]
+                    skipped_count = len(watches) - len(pending_watches)
+                    digests_skipped += skipped_count
 
                     if not pending_watches:
                         logger.debug(
@@ -279,19 +326,14 @@ class DigestService:
                         )
                         continue
 
-                    # 4. Persist digest records across all users watching this topic
-                    for w in pending_watches:
-                        _, created = await digest_repo.create_or_skip(
-                            user_id=w.user_id,
-                            watch_id=w.id,
-                            digest_date=target_date,
-                            summary_text=summary_text,
-                            article_ids=article_ids,
-                        )
-                        if created:
-                            digests_created += 1
-                        else:
-                            digests_skipped += 1
+                    # 4. Batch persist digest records across all subscriber watches in a single transaction
+                    created_digests = await digest_repo.create_batch_for_watches(
+                        watches=pending_watches,
+                        digest_date=target_date,
+                        summary_text=summary_text,
+                        article_ids=article_ids,
+                    )
+                    digests_created += len(created_digests)
 
                 # 5. Send email notification to each user who has subscribed topics
                 if digests_created > 0 and user_subscribed_topics:
