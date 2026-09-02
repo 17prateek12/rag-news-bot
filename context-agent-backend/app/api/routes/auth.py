@@ -28,9 +28,10 @@ from app.services.email_service import EmailService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# Cookie settings — set Secure=True in production (requires HTTPS)
+# Cookie settings — driven by environment (requires SameSite=none and Secure=True across origins in production)
 _COOKIE_MAX_AGE = settings.jwt_expire_minutes * 60
-_COOKIE_SECURE = False  # TODO: set True behind HTTPS in production
+_COOKIE_SECURE = settings.environment.lower() == "production"
+_COOKIE_SAMESITE = "none" if _COOKIE_SECURE else "lax"
 
 
 def _set_auth_cookie(response: Response, token: str) -> None:
@@ -40,7 +41,7 @@ def _set_auth_cookie(response: Response, token: str) -> None:
         value=token,
         httponly=True,
         max_age=_COOKIE_MAX_AGE,
-        samesite="lax",
+        samesite=_COOKIE_SAMESITE,
         secure=_COOKIE_SECURE,
         path="/",
     )
@@ -74,7 +75,12 @@ async def login(payload: UserLoginRequest, response: Response, db: AsyncSession 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(response: Response) -> None:
     """Clear the auth cookie (H-2)."""
-    response.delete_cookie(key="access_token", path="/", samesite="lax")
+    response.delete_cookie(
+        key="access_token",
+        path="/",
+        samesite=_COOKIE_SAMESITE,
+        secure=_COOKIE_SECURE,
+    )
 
 
 @router.get("/me", response_model=UserRead)

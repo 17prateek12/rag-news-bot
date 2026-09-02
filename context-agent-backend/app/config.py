@@ -84,6 +84,9 @@ class Settings(BaseSettings):
     retention_cron_hour: int
     retention_cron_minute: int
 
+    # App Environment ('local', 'production', 'staging')
+    environment: str = "local"
+
     # API
     api_host: str
     api_port: int

@@ -11,7 +11,9 @@ import {
 } from '../lib/voiceQuota'
 import { ChatSidebar } from '../components/chat/ChatSidebar'
 import { ChatArea } from '../components/chat/ChatArea'
-import type { ChatMessage } from '../api/types'
+import type { ChatMessage, ChatSession } from '../api/types'
+
+const EMPTY_SESSIONS: ChatSession[] = []
 
 export function ChatPage() {
   const { user, loading: authLoading, openAuth } = useAuth()
@@ -38,7 +40,11 @@ export function ChatPage() {
   }, [sessionId])
 
   // Fetch sessions using React Query (cached)
-  const { data: sessions = [], isLoading: loadingSessions } = useQuery({
+  const {
+    data: sessions = EMPTY_SESSIONS,
+    isLoading: loadingSessions,
+    isError: sessionsErrored,
+  } = useQuery({
     queryKey: ['chatSessions'],
     queryFn: () => api.listChatSessions(),
     enabled: !!user,
@@ -166,7 +172,8 @@ export function ChatPage() {
 
   // Redirect to correct session if sessionId is missing
   useEffect(() => {
-    if (!user || loadingSessions || !sessions) return
+    if (!user || loadingSessions || sessionsErrored) return
+    if (createSessionMutation.isPending || createSessionMutation.isError) return
     if (!sessionId) {
       const lastId = localStorage.getItem('last_chat_session_id')
       const lastExists = lastId && sessions.some((s) => s.id === lastId)
@@ -178,7 +185,16 @@ export function ChatPage() {
         createSessionMutation.mutate(undefined)
       }
     }
-  }, [user, sessions, sessionId, loadingSessions, navigate])
+  }, [
+    user,
+    sessions,
+    sessionId,
+    loadingSessions,
+    sessionsErrored,
+    navigate,
+    createSessionMutation.isPending,
+    createSessionMutation.isError,
+  ])
 
   const handleSendText = (e?: FormEvent) => {
     e?.preventDefault()
