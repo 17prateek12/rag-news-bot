@@ -1,389 +1,311 @@
-# Context Engine — AI-Powered News Analyst Bot
+# Context Engine — an AI news analyst that reads the news so you can ask it questions
 
-Context Engine is an advanced, production-grade agentic RAG application designed to deliver real-time news aggregation, semantic search, and contextual multi-turn conversational briefs. The platform implements an end-to-end RSS ingestion pipeline, custom vector search fusion, local Named Entity Recognition (NER), response caching, and a responsive frontend client.
+Context Engine is a full-stack application that continuously reads news from RSS feeds, understands what it's reading, and lets you have a real conversation about current events — with every answer grounded in actual articles, not the model's imagination.
 
----
+Think of it less as "ChatGPT with news" and more as **a research assistant that has already read today's papers and can defend every sentence it writes with a source.**
 
-## 1. Functional Requirements
-
-### Ingestion & ETL Pipeline
-1. **Multi-Source Fetching:** Ingests articles periodically from multiple RSS feeds (BBC, Al Jazeera, etc.) and extracts transcripts from YouTube links.
-2. **Deduplication:** Enforces unique constraint rules on Postgres (`source_id`, `url`). Articles fetched across multiple categories link to existing database rows instead of duplicating.
-3. **Local NER & Canonicalization:** Processes article text locally via spaCy (`en_core_web_sm`) to extract named entities (People, Locations, Organizations). Entities are canonicalized (merged if vector similarity $\ge 0.85$ in Qdrant `trending_entities`) and saved.
-4. **Ingest Metrics Dashboard:** Exposes duration stats, parsing errors, deduplication rates, and point counts on an admin dashboard.
-
-### Search & Conversational RAG
-1. **Hybrid Retrieval:** Blends PostgreSQL BM25 lexical search and Qdrant Cloud dense vector search (using `text-embedding-004`), fused via Reciprocal Rank Fusion (RRF).
-2. **Cross-Encoder Reranking:** Reranks fused search candidates using a Hugging Face Cross-Encoder model (`cross-encoder/ms-marco-MiniLM-L-6-v2`) to compute high-fidelity relevance scores.
-3. **Relevance Score Floor:** Filters low-relevance results using a configurable rerank score threshold (`relevance_score_floor`).
-4. **Query Rewriting:** Rewrites queries in multi-turn sessions to resolve phrasing, resolve typos, and anchor active conversation topics.
-5. **Real-Time Web Fallback:** Automatically queries Tavily search to fetch live web news when local database coverage is empty or low.
-6. **Multi-Turn Citation Recovery:** Scans generated answers for citation indexes (e.g. `[3]`) and dynamically recovers cited sources from database chat history log tables if they are absent from the current turn's retrieval hits.
-7. **Response Caching:** Caches streaming and non-streaming RAG responses for 15 minutes. Cache hits trigger Celery tasks to update trending query metrics asynchronously.
-
-### User Watch Alerts & Digests
-1. **Personalized Daily Digests:** Automatically synthesizes daily brief digests matching topics of interest configured in user profiles.
-2. **Significant Watches:** Scans new articles against watch keywords and triggers a Gemini LLM call to verify if matched events represent a "significant development" before creating user alerts.
+This README is written so that a backend engineer, a frontend engineer, a product person, and someone who has never touched code can all read it and come away understanding what this project does and how it works. Skip to whichever section answers your question.
 
 ---
 
-## 2. Non-Functional Requirements (NFRs)
+## Table of contents
 
-- **Performance & Latency:**
-  - Raw searches resolve in under 50ms.
-  - RAG classifications, hybrid fusion, and reranking execute in under 300ms (excluding LLM stream token generation time).
-- **Scalability & Resource Isolation:**
-  - CPU-bound tasks (local spaCy NER) and database count increments are fully delegated to background Celery workers.
-  - Ingestion processes operate as non-blocking background workers, isolating the FastAPI ASGI server threads to handle web requests.
-- **Security & JWT Separation:**
-  - Separate authentication tables and JWT tokens for `admins` and `users`.
-  - Cron tasks (Cloud Scheduler or local scheduler) run via secure `X-Admin-Api-Key` headers.
-- **Robustness:**
-  - Dynamic `rediss://` query parameter injector to automatically enable SSL/TLS validation bypass (`ssl_cert_reqs=CERT_NONE`) for serverless Redis brokers (e.g., Upstash).
-  - Auto-ensured payload keyword indexes for `article_id` on Qdrant Cloud point collections to avoid bad request errors during scroll queries.
-
----
-
-## 3. System High-Level Design (HLD)
-
-The application follows a decoupled client-server architecture. All relational state resides in PostgreSQL, vector coordinates map to Qdrant Cloud, and asynchronous task states are coordinated through Redis.
-
-```mermaid
-graph TD
-    User([End User]) <-->|HTTP / SSE| ReactApp[React Frontend Client]
-    ReactApp <-->|REST API / JSON| FastAPI[FastAPI Backend Server]
-    FastAPI <-->|SQLAlchemy Asyncpg| Postgres[(PostgreSQL DB)]
-    FastAPI <-->|HTTP / REST Client| Qdrant[(Qdrant Cloud Vector DB)]
-    FastAPI -->|Redis Queue Broker| CeleryBeat[Celery Beat Scheduler]
-    FastAPI -->|Redis Queue Broker| CeleryWorker[Celery Worker Daemon]
-    CeleryWorker <--> Postgres
-    CeleryWorker <--> Qdrant
-    CeleryWorker -->|RSS Parser| ExternalRSS[RSS Feed Feeds]
-    FastAPI <-->|REST API| Gemini[Gemini Pro & Flash LLM]
-    FastAPI <-->|REST API| Tavily[Tavily Search API]
-```
-
-### Core Architecture Components
-1. **Frontend App (React + TypeScript):** Compiled via Vite. Renders chat streams, manages recording buffers, renders daily digests, watch alerts, and displays ETL observability logs.
-2. **API Server (FastAPI):** Async server exposing routers for public search, chat session histories, digests, watches, and admin dashboards.
-3. **Database (PostgreSQL):** Stores users, admin credentials, RSS configurations, categories, messages, and hourly/canonicalized trending stats.
-4. **Vector DB (Qdrant Cloud):** Houses dense embeddings in two collections:
-   - `news_chunks`: Text vectors for hybrid search.
-   - `trending_entities`: Dense vector representations of canonicalized entities.
-5. **Message Broker (Redis):** Orchestrates task state queues and hosts RAG response cache stores.
-6. **Task Scheduler (Celery worker + Beat):** Periodically runs RSS crawlers and retention tasks in the background.
+1. [What problem this solves](#1-what-problem-this-solves)
+2. [What it actually does — in plain English](#2-what-it-actually-does--in-plain-english)
+3. [How it works, end to end](#3-how-it-works-end-to-end)
+4. [The tech stack, and why each piece was chosen](#4-the-tech-stack-and-why-each-piece-was-chosen)
+5. [Architecture diagram](#5-architecture-diagram)
+6. [Project structure](#6-project-structure)
+7. [Every feature, explained](#7-every-feature-explained)
+8. [Running it locally](#8-running-it-locally)
+9. [Configuration reference](#9-configuration-reference)
+10. [API overview](#10-api-overview)
+11. [Design principles this project follows](#11-design-principles-this-project-follows)
+12. [Known limitations](#12-known-limitations)
+13. [Roadmap / what's next](#13-roadmap--whats-next)
 
 ---
 
-## 4. System Low-Level Design (LLD)
+## 1. What problem this solves
 
-### Ingestion Flow & Deduplication
+Ask a general-purpose chatbot "what's happening with X right now" and one of two things happens: it tells you honestly that it doesn't know (its knowledge has a cutoff date), or worse, it *guesses* confidently and gets it wrong.
+
+Context Engine solves this by never answering from memory. Every response is built from a two-step process: **first find real, current articles that are actually relevant, then ask the AI to summarize and explain only what those articles say** — with a citation on every claim. If nothing relevant can be found, it says so, instead of making something up. This pattern is called **RAG — Retrieval-Augmented Generation** — and this project is a complete, working, end-to-end implementation of it, built from scratch rather than assembled from a framework.
+
+## 2. What it actually does — in plain English
+
+- **It reads the news for you, automatically.** A background process checks RSS feeds from real news sources (BBC, Al Jazeera, The Hindu, NDTV, and others) every few hours, pulls in new articles, and files them away — cleaned up, de-duplicated, and indexed so they can be searched instantly.
+- **You can chat with it about current events.** Ask "what's going on with the Ukraine ceasefire talks" and it searches everything it has read, picks the most relevant pieces, and writes you a proper answer — citing exactly which articles it used, so you can go read the originals yourself.
+- **It remembers the conversation.** Ask a follow-up like "what about the EU's reaction?" and it understands you're still talking about the same topic — it doesn't need you to repeat context.
+- **If it doesn't know something, it goes and finds out.** When its own archive doesn't have enough relevant coverage, it automatically does a live web search rather than answering from thin air.
+- **It shows you what's trending** — both what's actually big in the news right now, and, separately, what *other users* have been asking about — as two different leaderboards.
+- **You can "watch" a topic** (a person, an event, a keyword) and get a daily digest emailed to you automatically summarizing what happened, without having to check back yourself.
+- **You can talk to it, literally** — there's voice input, so you can ask a question out loud instead of typing.
+
+## 3. How it works, end to end
+
+There are really two independent halves to this system, running on their own schedules:
+
+### Half one: reading the news (happens continuously, in the background, with no user involved)
+
+1. A scheduled job wakes up and checks every configured RSS feed for new articles.
+2. Each new article is cleaned up (HTML stripped, tracking junk removed from URLs) and checked against the database — if it's already been seen, it's skipped.
+3. New articles are broken into small, overlapping chunks (so a long article can be searched piece by piece, not just as one giant blob) and each chunk is converted into a numerical representation (an "embedding") that captures its *meaning*, not just its words.
+4. Those embeddings are stored in a vector database, ready to be searched by meaning later.
+5. The system also scans each article to pull out named things — people, places, organizations — and keeps a running tally of how often each one is mentioned, which is what powers the "trending" feature.
+
+### Half two: answering a question (happens the moment you ask something)
+
+1. Your question is first classified — is this a quick factual lookup ("who is the president of X"), a "why did this happen" question, or a broad "what's the full picture" request? Each type gets handled differently, because they genuinely need different kinds of answers.
+2. If you're mid-conversation, your question is rewritten to stand on its own (so "what about him?" becomes something searchable, using context from what you'd been discussing).
+3. The system searches its archive **two different ways at once** — once for articles that *mean* something similar to your question, and once for articles that contain the *exact words* you used — and intelligently combines both result sets, because meaning-based and word-based search each catch things the other misses.
+4. A second, more careful pass re-scores the top candidates for genuine relevance (this step is slower but much more accurate, so it only runs on a short list, not everything).
+5. If local coverage is thin, empty, or too old, it automatically searches the live web to fill the gap.
+6. Only *then* does it hand the best evidence to the AI model and ask it to write an answer — with explicit instructions to cite everything and never state something the evidence doesn't support.
+7. The final answer is double-checked: any source that isn't actually cited in the text gets dropped from what's shown to you, so you only ever see sources that were genuinely used.
+
+## 4. The tech stack, and why each piece was chosen
+
+No component in this stack was picked by default — each one is solving a specific problem that a simpler choice wouldn't have:
+
+| Layer | Technology | Why this, specifically |
+|---|---|---|
+| **Backend framework** | FastAPI (Python) | Nearly everything this app does is waiting on something external (a database, a search index, an AI model) — FastAPI's native async support means the server can handle many of these waits *at the same time* instead of one at a time. |
+| **Relational database** | PostgreSQL | Stores everything structured: articles, users, chat history, watch lists. Also doubles as the keyword-search engine (via its built-in full-text search) — one fewer service to run. |
+| **Vector database** | Qdrant | Purpose-built for "find me things that mean something similar to this," which a normal database isn't designed to do efficiently at scale. |
+| **Cache & message broker** | Redis | One piece of infrastructure, four jobs: caching search results so repeat questions are instant, queuing background jobs, rate-limiting login attempts, and broadcasting "new articles just arrived" events in real time. |
+| **Background jobs** | Celery | Anything slow (reading RSS feeds, generating daily digests, cleaning up old data) runs here, off to the side, so it never makes a user wait. |
+| **AI model** | Google Gemini (via Vertex AI) | One provider handles embeddings, answer generation, *and* voice transcription — fewer integrations, fewer API keys to manage. |
+| **Re-ranking model** | A local cross-encoder (`ms-marco-MiniLM-L-6-v2`) | Runs on the server itself rather than calling out to another API — important because this step runs on every single search and needs to be fast. |
+| **Named-entity recognition** | spaCy (local) | Same reasoning — this runs on every article and every question, so it needs to be free and instant, not a paid API call. |
+| **Live web search fallback** | Tavily | Built specifically for feeding AI systems clean, structured search results — not a general search engine meant for humans to read directly. |
+| **Frontend** | React + TypeScript + Vite | A fast, modern, type-safe frontend stack with a quick development loop. |
+| **Frontend data-fetching** | React Query (TanStack Query) | Nearly all of this app's frontend state *is* server data (articles, chats, trending) — React Query is built exactly for that, handling caching and refetching without a separate state-management library. |
+
+## 5. Architecture diagram
+
 ```
-  [ Celery Beat / Trigger ]
-              │
-              ▼
-    [ Fetch RSS Feed XML ]
-              │
-              ▼
-    [ Deduplicate URL in DB ] ──(Exists?)──► [ Link to Categories in Junction Table ]
-              │                                                │
-          (New URL)                                            ▼
-              │                                             [ Skip ]
-              ▼
-    [ Clean & Chunk Article ]
-              │
-              ▼
-     [ Vectorize Chunk ] ──► [ Upsert points in Qdrant 'news_chunks' ]
-              │
-              ▼
-   [ Extract Entities (spaCy) ]
-              │
-              ▼
-  [ Canonicalize in Qdrant ] ──► [ Save Entity and Increment Ingestion Counts in DB ]
+                         ┌───────────────────────┐
+   You  ───HTTP / SSE───▶│   React Frontend      │
+                         └───────────┬───────────┘
+                                     │ REST + streaming, cookie-authenticated
+                                     ▼
+                         ┌───────────────────────┐
+                         │   FastAPI Backend      │◀────────┐
+                         └──┬─────────┬───────┬──┘          │
+                            │         │       │              │
+              SQLAlchemy    │         │       │ REST          │ real-time
+                            ▼         │       ▼               │ push
+                  ┌──────────────┐    │  ┌──────────────┐     │
+                  │  PostgreSQL  │    │  │    Qdrant    │     │
+                  │ (data + text │    │  │ (vector      │     │
+                  │  search)     │    │  │  search)     │     │
+                  └──────────────┘    │  └──────────────┘     │
+                                      │                        │
+                              Redis (cache, queue, pub/sub) ───┘
+                                      │
+                                      ▼
+                     ┌────────────────────────────┐
+                     │  Celery Worker + Scheduler   │──▶ RSS Feeds
+                     └────────────────────────────┘
+                            │
+                  ┌─────────┴─────────┐
+                  ▼                   ▼
+          ┌──────────────┐    ┌──────────────┐
+          │ Gemini (AI)  │    │   Tavily     │
+          │ embeddings + │    │  (live web   │
+          │ answers + STT│    │  fallback)   │
+          └──────────────┘    └──────────────┘
 ```
 
-### RAG Retrieval & Answer Synthesis
+The API server holds no important state of its own — everything that matters lives in Postgres, Qdrant, or Redis — which means you can run several copies of it behind a load balancer with no special coordination needed.
+
+## 6. Project structure
+
 ```
-        [ User Query ]
-              │
-              ▼
-    [ Intent Classification ]
-              │
-              ▼
-     [ Query Rewriter ]
-              │
-              ▼
-      [ Hybrid Search ] ──► [ RRF Fusion ] ──► [ Reranking & Relevance Floor ]
-                                                            │
-                                                     (Hits Empty?)
-                                                      /        \
-                                                   (Yes)       (No)
-                                                   /              \
-                                     [ Tavily Web Search ]      [ Prompt builder ]
-                                                   \              /
-                                                    ▼            ▼
-                                              [ LLM Stream Generation ]
-                                                         │
-                                                         ▼
-                                             [ SSE final_sources Event ]
-                                                         │
-                                                         ▼
-                                            [ Citation Recovery Resolver ]
+context-agent-backend/
+├── app/
+│   ├── api/routes/       # every HTTP endpoint, grouped by feature (chat, search, admin, ...)
+│   ├── core/             # infrastructure: database connections, auth, logging, error handling
+│   ├── ingestion/        # the RSS-reading pipeline: fetch → clean → chunk → embed
+│   ├── models/           # database table definitions
+│   ├── repositories/     # all raw database/Qdrant queries live here, nowhere else
+│   ├── schemas/          # request/response shapes (what the API accepts and returns)
+│   ├── services/         # the actual business logic — this is where the RAG pipeline lives
+│   └── worker/           # background jobs and their schedule
+├── alembic/              # database migration history
+└── requirements.txt
+
+context-agent-frontend/
+├── src/
+│   ├── api/              # the one place that talks to the backend
+│   ├── components/       # reusable UI pieces, grouped by feature
+│   ├── context/           # app-wide state (who's logged in, light/dark theme)
+│   ├── hooks/             # reusable data-fetching logic
+│   ├── pages/             # one file per screen (Home, Chat, Trending, ...)
+│   └── lib/               # small standalone helpers
+└── package.json
 ```
 
----
+## 7. Every feature, explained
 
-## 5. Setup & Running Locally
+### Reading & indexing the news
+- Pulls from multiple RSS sources on a schedule, each with its own parser to handle that source's particular formatting quirks.
+- Never stores the same article twice — a database-level rule enforces this, not just application logic.
+- Cleans article text, splits it into overlapping chunks (so long articles remain searchable at the paragraph level), and generates a searchable "meaning fingerprint" (embedding) for each chunk.
+- Identifies people, places, and organizations mentioned in each article and tracks how often each one comes up, hour by hour.
+
+### Search & conversation
+- **Hybrid search**: combines meaning-based search and exact-keyword search, because each one alone misses things the other catches (meaning-search can miss an exact name; keyword-search can miss a differently-worded but relevant article).
+- **Re-ranking**: after the first, fast search pass, a second, more careful pass re-scores the top results specifically for relevance — including nudging up very recent articles and down articles that turn out to be about a *former* office-holder or *past* situation, a common source of confusing answers.
+- **Live web fallback**: if the archive doesn't have good enough local coverage, it automatically checks the live web instead of answering from a thin or empty result set.
+- **Multi-turn memory**: chat sessions persist, follow-up questions are automatically rewritten with context from the conversation so far, and a source cited three messages ago can still be referenced correctly later.
+- **Every claim is sourced**: the system is built to refuse to answer rather than make something up when it can't find genuinely relevant evidence.
+- **Voice input**: record a question instead of typing it; it's transcribed and handled exactly like a typed message.
+
+### Trending & discovery
+- Two separate "trending" lists: what's actually big in the news (based on how often something is mentioned across articles) versus what people are *asking about* (based on real user questions) — genuinely different signals, tracked independently.
+- Click into any trending topic to see the specific articles behind it.
+
+### Watches & digests
+- Track up to five topics you care about.
+- Once a day, a background job checks for new coverage of each watched topic and writes you a summarized digest — and emails you when a new one is ready.
+
+### Accounts & security
+- Separate login systems for regular users and administrators, so a compromised user account can never reach admin functionality.
+- Sessions are stored in secure, browser-inaccessible cookies rather than anywhere JavaScript could read them — a deliberate defense against a common class of security bug.
+- Login attempts are rate-limited to prevent brute-forcing.
+
+### Admin tools
+- Manage news sources and categories.
+- Trigger a news-ingestion run or a digest run manually, on demand.
+- Check the health of the search index and see which categories have no active news source feeding them.
+
+## 8. Running it locally
 
 ### Prerequisites
-- **Python 3.12+**
-- **Node.js 18+**
-- **Docker**
+- Python 3.12+
+- Node.js 18+
+- Docker (for Postgres, Redis, and Qdrant)
+- A Google Cloud project with Vertex AI enabled (for embeddings, generation, and speech-to-text)
+- A Tavily API key (for the live web-search fallback)
 
-### 1. Database & Cache Startup
-Start Postgres, Redis, and Qdrant containers:
+### Step 1 — Start the databases
+
 ```bash
+cd context-agent-backend
 docker-compose up -d
 ```
+This brings up Postgres, Redis, Qdrant, and Adminer (a simple database viewer at whatever port you configure).
 
-### 2. Backend Setup
-1. Change directory to the backend repository:
-   ```bash
-   cd context-agent-backend
-   ```
-2. Copy `.env.example` to `.env` and fill in your connection credentials and API keys:
-   ```bash
-   cp .env.example .env
-   ```
-3. Install dependencies and download the spaCy English NLP pipeline:
-   ```bash
-   pip install -r requirements.txt
-   python -m spacy download en_core_web_sm
-   ```
-4. Run database schema migrations:
-   ```bash
-   alembic upgrade head
-   ```
-5. Start the FastAPI ASGI server:
-   ```bash
-   python -m uvicorn app.main:app --port 8000 --reload
-   ```
-6. Start the Celery Worker and Beat Scheduler (in separate terminals):
-   - **Worker:**
-     ```bash
-     celery -A app.worker.celery_app.celery_app worker --loglevel=info -P solo
-     ```
-   - **Beat Scheduler:**
-     ```bash
-     celery -A app.worker.celery_app.celery_app beat --loglevel=info
-     ```
+### Step 2 — Set up the backend
 
-### 3. Frontend Setup
-1. Change directory to the frontend client folder:
-   ```bash
-   cd ../context-agent-frontend
-   ```
-2. Copy `.env.example` to `.env` and define the backend API URL:
-   ```bash
-   cp .env.example .env
-   ```
-3. Install dependencies:
-   ```bash
-   npm install
-   ```
-4. Start the Vite dev server:
-   ```bash
-   npm run dev
-   ```
-   Open `http://localhost:5173` in your browser.
+```bash
+cp .env.example .env       # then fill in the values — see the reference table below
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
+alembic upgrade head       # creates all database tables
+```
+
+You'll also need Google Cloud credentials available to the app — the simplest way locally is:
+```bash
+gcloud auth application-default login
+```
+
+Then start three separate processes (each in its own terminal):
+
+```bash
+# The API server
+python -m uvicorn app.main:app --port 8000 --reload
+
+# The background job runner
+celery -A app.worker.celery_app.celery_app worker --loglevel=info -P solo
+
+# The scheduler (triggers jobs like ingestion on a timer)
+celery -A app.worker.celery_app.celery_app beat --loglevel=info
+```
+
+### Step 3 — Set up the frontend
+
+```bash
+cd ../context-agent-frontend
+cp .env.example .env       # set VITE_API_URL to wherever your backend is running
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`. You should see the homepage — but it'll be empty until the first ingestion run happens. You can trigger one manually rather than waiting for the schedule:
+
+```bash
+curl -X POST http://localhost:8000/admin/ingest/run \
+  -H "X-Admin-Api-Key: <the ADMIN_API_KEY value from your .env>"
+```
+
+Give it a minute or two — it's fetching, cleaning, chunking, and embedding real articles — then refresh the homepage.
+
+## 9. Configuration reference
+
+Every setting lives in `context-agent-backend/.env`. Grouped by what they control:
+
+| Group | Variables | What they're for |
+|---|---|---|
+| **Database** | `DATABASE_URL`, `SYNC_DATABASE_URL` | Postgres connection strings — async for the API, sync for Alembic migrations. |
+| **Cache / queue** | `REDIS_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` | Usually all point at the same Redis instance. |
+| **Vector search** | `QDRANT_URL`, `QDRANT_COLLECTION`, `EMBEDDING_DIMENSIONS` | Where the vector database lives and how big each embedding is. |
+| **AI models** | `GCP_PROJECT`, `GCP_LOCATION`, `EMBEDDING_MODEL`, `GEMINI_MODEL` | Which Google Cloud project and which models to call. |
+| **Chunking** | `CHUNK_SIZE`, `CHUNK_OVERLAP` | How articles are split up before being embedded. |
+| **Hybrid search** | `HYBRID_SEMANTIC_LIMIT`, `HYBRID_BM25_LIMIT`, `RRF_K` | How many candidates each search method returns, and how strongly results are re-weighted when combined. |
+| **Re-ranking** | `RERANKER_ENABLED`, `RERANKER_MODEL`, `RELEVANCE_SCORE_FLOOR` | Whether the second, careful relevance pass is on, and how strict the cutoff is. |
+| **Web fallback** | `WEB_FALLBACK_ENABLED`, `TAVILY_API_KEY`, `WEB_FALLBACK_STALE_HOURS` | Whether/when to check the live web instead of just local coverage. |
+| **Caching** | `CACHE_ENABLED`, `CACHE_SEARCH_TTL_SECONDS`, `CACHE_RAG_TTL_SECONDS` | How long different kinds of results are cached before being recomputed. |
+| **Auth** | `JWT_SECRET`, `JWT_EXPIRE_MINUTES`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_API_KEY` | Session security and the one seeded admin account. |
+| **Ingestion** | `ARTICLE_RETENTION_DAYS`, `INGEST_INTERVAL_HOURS` | How long articles are kept, and how often new ones are fetched. |
+| **Voice input** | `STT_ENABLED`, `STT_MODEL`, `STT_MAX_AUDIO_BYTES` | Speech-to-text settings and upload limits. |
+
+> **A note on `JWT_SECRET`**: the app will refuse to start if this is left at an obvious placeholder value — don't skip setting it to something real, even for local development.
+
+## 10. API overview
+
+The full backend exposes ~50 endpoints; here are the ones you'll use most:
+
+| What you want to do | Endpoint |
+|---|---|
+| Search the archive | `GET /search/hybrid?q=...` |
+| Ask a one-off question, no login required | `POST /agent/query` |
+| Start/continue a logged-in chat | `POST /chat/sessions/{id}/messages` |
+| See what's trending | `GET /trending` |
+| Register / log in | `POST /auth/register`, `POST /auth/login` |
+| Track a topic | `POST /watches` |
+| See your digests | `GET /digests` |
+| Trigger a news refresh (admin) | `POST /admin/ingest/run` |
+
+Interactive, always-up-to-date documentation for every endpoint is auto-generated by FastAPI and available at `http://localhost:8000/docs` once the server is running.
+
+## 11. Design principles this project follows
+
+- **Never answer without evidence.** If the search pipeline can't find genuinely relevant material, the system says so rather than guessing.
+- **Cache aggressively, but invalidate simply.** Every layer of search/answer results is cached, and a single version counter — bumped once whenever new articles arrive — invalidates everything at once, rather than needing to track down every stale cache entry individually.
+- **Keep slow work off the request path.** Anything that takes more than a moment (reading RSS feeds, running NLP, sending emails) happens in the background, never while someone is waiting on a response.
+- **One clear owner per concern.** Routes handle HTTP, services hold business logic, repositories own the actual database/search queries — each layer has exactly one job, which makes the codebase far easier to navigate and change safely.
+- **Fail safe, not silent.** Rate limiting blocks requests if its own backing store is unreachable, rather than quietly letting everything through; errors return structured, consistent responses instead of vague failures.
+
+## 12. Known limitations
+
+Being upfront about the current gaps, rather than glossing over them:
+
+- Real-time "typing" streaming is fully built on the backend but not yet wired into the chat interface — you currently see the full answer appear at once rather than word by word.
+- The homepage's quick-search box uses simpler keyword search rather than the full hybrid pipeline the chat experience uses.
+- There's no automated test coverage yet for the core search/answer pipeline specifically (other parts of the system are tested).
+- A single flaky news source can slow down a full ingestion run — there's no automatic skip-and-retry-later behavior yet.
+
+## 13. Roadmap / what's next
+
+- Wire up real-time streaming responses in the chat UI.
+- Add automated tests around the search and answer-generation pipeline.
+- Make the news-source list resilient to individual feeds timing out.
+- Move the client-side voice-input usage limit to a properly enforced server-side check.
+- Explore letting the system make its own decision about *when* to search the live web, rather than following a fixed rule.
 
 ---
 
-## 6. Complete Postman API Collection
-
-Import the JSON schema below directly into Postman to test all system endpoints.
-
-```json
-{
-  "info": {
-    "name": "News Context Agent API",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-  },
-  "item": [
-    {
-      "name": "Public Endpoints",
-      "item": [
-        {
-          "name": "Health Status",
-          "request": {
-            "method": "GET",
-            "url": "http://localhost:8000/health"
-          }
-        },
-        {
-          "name": "Hybrid Search",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "http://localhost:8000/search/hybrid?q=ukraine war&limit=3",
-              "protocol": "http",
-              "host": ["localhost"],
-              "port": "8000",
-              "path": ["search", "hybrid"],
-              "query": [
-                { "key": "q", "value": "ukraine war" },
-                { "key": "limit", "value": "3" }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Direct Agent Query (No Session)",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"query\": \"What is happening in Ukraine?\",\n  \"limit\": 6,\n  \"history\": []\n}"
-            },
-            "url": "http://localhost:8000/agent/query"
-          }
-        }
-      ]
-    },
-    {
-      "name": "User Chat Endpoints",
-      "item": [
-        {
-          "name": "User Registration",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"user@contextagent.local\",\n  \"password\": \"securepassword123\"\n}"
-            },
-            "url": "http://localhost:8000/auth/register"
-          }
-        },
-        {
-          "name": "User Login",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"user@contextagent.local\",\n  \"password\": \"securepassword123\"\n}"
-            },
-            "url": "http://localhost:8000/auth/login"
-          }
-        },
-        {
-          "name": "List Chat Sessions",
-          "request": {
-            "method": "GET",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
-            ],
-            "url": "http://localhost:8000/chat/sessions"
-          }
-        },
-        {
-          "name": "Create Chat Session",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{jwt_token}}" },
-              { "key": "Content-Type", "value": "application/json" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"title\": \"Ukraine conflict analysis\"\n}"
-            },
-            "url": "http://localhost:8000/chat/sessions"
-          }
-        },
-        {
-          "name": "Send Message",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{jwt_token}}" },
-              { "key": "Content-Type", "value": "application/json" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"query\": \"Why did Ukraine target Russian oil refineries?\",\n  \"limit\": 6\n}"
-            },
-            "url": "http://localhost:8000/chat/sessions/{{session_id}}/messages"
-          }
-        }
-      ]
-    },
-    {
-      "name": "Trending Endpoints",
-      "item": [
-        {
-          "name": "Get Trending List",
-          "request": {
-            "method": "GET",
-            "url": "http://localhost:8000/trending?limit=15"
-          }
-        },
-        {
-          "name": "Get Backing Coverage for Trending Entity",
-          "request": {
-            "method": "GET",
-            "url": "http://localhost:8000/trending/entities/{{entity_id}}/articles"
-          }
-        }
-      ]
-    },
-    {
-      "name": "Admin Management Endpoints",
-      "item": [
-        {
-          "name": "Admin Login",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"admin@contextagent.local\",\n  \"password\": \"your-strong-password\"\n}"
-            },
-            "url": "http://localhost:8000/admin/login"
-          }
-        },
-        {
-          "name": "Force Ingest All Feeds",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "X-Admin-Api-Key", "value": "{{admin_api_key}}" }
-            ],
-            "url": "http://localhost:8000/admin/ingest/run"
-          }
-        },
-        {
-          "name": "Cleanup Old Articles (Retention)",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "X-Admin-Api-Key", "value": "{{admin_api_key}}" }
-            ],
-            "url": "http://localhost:8000/admin/maintenance/cleanup"
-          }
-        }
-      ]
-    }
-  ]
-}
-```
+*Questions, ideas, or found a bug? Open an issue — this project is actively maintained and improving.*
