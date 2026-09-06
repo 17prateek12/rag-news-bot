@@ -3,11 +3,13 @@ import logging
 from app.config import settings
 from app.core.exceptions import LLMError
 from app.core.gemini_client import get_gemini_client
+from app.core.tracing import traceable
 
 logger = logging.getLogger(__name__)
 
 
 class LLMService:
+    @traceable(name="gemini_generate_stream", run_type="llm")
     def generate_stream(self, prompt: str):
         logger.info("LLM generate_stream model=%s prompt_chars=%s", settings.gemini_model, len(prompt))
         try:
@@ -28,6 +30,7 @@ class LLMService:
                 cause=exc,
             ) from exc
 
+    @traceable(name="gemini_generate", run_type="llm")
     def generate(self, prompt: str) -> str:
         logger.info("LLM generate model=%s prompt_chars=%s", settings.gemini_model, len(prompt))
         try:

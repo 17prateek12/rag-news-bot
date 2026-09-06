@@ -84,6 +84,22 @@ class Settings(BaseSettings):
     retention_cron_hour: int
     retention_cron_minute: int
 
+    # Environment
+    environment: str = "local"
+
+    # LangSmith Tracing & Observability
+    langchain_tracing_v2: bool = False
+    langchain_api_key: str = ""
+    langchain_project: str = "context-agent"
+    langchain_endpoint: str = "https://api.smith.langchain.com"
+
+    # Feature Flags (Strangler Fig Adoption)
+    use_langchain_output_parsing: bool = False
+    use_langchain_query_rewriter: bool = False
+    use_langgraph_router: bool = False
+    use_langgraph_router_stream: bool = False
+    shadow_mode_enabled: bool = False
+
     # API
     api_host: str
     api_port: int

@@ -1,0 +1,297 @@
+[
+  {
+    "id": "sf_01",
+    "query": "who is the ISRO chairman",
+    "expected_intent": "single_fact",
+    "must_not_contain": ["Sivan is current", "Kasturirangan is current"],
+    "category": "leadership_lookup"
+  },
+  {
+    "id": "sf_02",
+    "query": "when did Chandrayaan-3 land on the moon",
+    "expected_intent": "single_fact",
+    "category": "date_lookup"
+  },
+  {
+    "id": "sf_03",
+    "query": "what is the capital of France",
+    "expected_intent": "single_fact",
+    "category": "factual_definition"
+  },
+  {
+    "id": "sf_04",
+    "query": "who won the ICC Cricket World Cup in 2023",
+    "expected_intent": "single_fact",
+    "category": "sports_fact"
+  },
+  {
+    "id": "sf_05",
+    "query": "how many medals did India win in Paris Olympics 2024",
+    "expected_intent": "single_fact",
+    "category": "numeric_stat"
+  },
+  {
+    "id": "sf_06",
+    "query": "who is the current CEO of Microsoft",
+    "expected_intent": "single_fact",
+    "category": "leadership_lookup"
+  },
+  {
+    "id": "sf_07",
+    "query": "what is the currency of Japan",
+    "expected_intent": "single_fact",
+    "category": "factual_definition"
+  },
+  {
+    "id": "sf_08",
+    "query": "who is the President of France",
+    "expected_intent": "single_fact",
+    "category": "leadership_lookup"
+  },
+  {
+    "id": "sf_09",
+    "query": "when was RBI established",
+    "expected_intent": "single_fact",
+    "category": "date_lookup"
+  },
+  {
+    "id": "sf_10",
+    "query": "what was the score in the final match",
+    "expected_intent": "single_fact",
+    "category": "sports_fact"
+  },
+  {
+    "id": "sf_11",
+    "query": "who is the chief minister of Maharashtra",
+    "expected_intent": "single_fact",
+    "category": "leadership_lookup"
+  },
+  {
+    "id": "sf_12",
+    "query": "what is the repo rate announced by RBI",
+    "expected_intent": "single_fact",
+    "category": "numeric_stat"
+  },
+  {
+    "id": "sf_13",
+    "query": "who founded OpenAI",
+    "expected_intent": "single_fact",
+    "category": "leadership_lookup"
+  },
+  {
+    "id": "sf_14",
+    "query": "who was the former chairman of ISRO before S Somanath",
+    "expected_intent": "single_fact",
+    "category": "former_officeholder_edge_case"
+  },
+  {
+    "id": "sf_15",
+    "query": "what is the launch date of Aditya-L1",
+    "expected_intent": "single_fact",
+    "category": "date_lookup"
+  },
+  {
+    "id": "fu_01",
+    "query": "why did the opposition stage a walkout in parliament",
+    "expected_intent": "follow_up",
+    "category": "causal_explanation"
+  },
+  {
+    "id": "fu_02",
+    "query": "what triggered the protest in Kolkata",
+    "expected_intent": "follow_up",
+    "category": "event_cause"
+  },
+  {
+    "id": "fu_03",
+    "query": "what were the key demands of the protesting doctors",
+    "expected_intent": "follow_up",
+    "category": "demands_explanation"
+  },
+  {
+    "id": "fu_04",
+    "query": "why is the government increasing tariffs on imports",
+    "expected_intent": "follow_up",
+    "category": "policy_reasoning"
+  },
+  {
+    "id": "fu_05",
+    "query": "what about his response to the allegations",
+    "expected_intent": "follow_up",
+    "history": [
+      {"role": "user", "text": "What did the opposition say about the minister?"},
+      {"role": "assistant", "text": "The opposition accused the minister of irregularities."}
+    ],
+    "category": "conversational_follow_up"
+  },
+  {
+    "id": "fu_06",
+    "query": "how did the market react to the announcement",
+    "expected_intent": "follow_up",
+    "history": [
+      {"role": "user", "text": "RBI announced a change in repo rate today."},
+      {"role": "assistant", "text": "The central bank decided to hold the policy rates."}
+    ],
+    "category": "reaction_follow_up"
+  },
+  {
+    "id": "fu_07",
+    "query": "why was the flight grounded",
+    "expected_intent": "follow_up",
+    "category": "incident_cause"
+  },
+  {
+    "id": "fu_08",
+    "query": "what actions did the police take following the incident",
+    "expected_intent": "follow_up",
+    "category": "action_consequence"
+  },
+  {
+    "id": "fu_09",
+    "query": "what happened next after the meeting",
+    "expected_intent": "follow_up",
+    "history": [
+      {"role": "user", "text": "Did the two leaders meet in Delhi?"},
+      {"role": "assistant", "text": "Yes, bilateral talks concluded on Thursday."}
+    ],
+    "category": "chronological_continuation"
+  },
+  {
+    "id": "fu_10",
+    "query": "why is the union calling for a nationwide strike",
+    "expected_intent": "follow_up",
+    "category": "labor_cause"
+  },
+  {
+    "id": "fu_11",
+    "query": "what are the legal arguments against the new bill",
+    "expected_intent": "follow_up",
+    "category": "legal_reasoning"
+  },
+  {
+    "id": "fu_12",
+    "query": "how does this compare with the previous quarter",
+    "expected_intent": "follow_up",
+    "history": [
+      {"role": "user", "text": "TCS reported revenue growth of 4%."},
+      {"role": "assistant", "text": "The IT major announced Q1 financial results."}
+    ],
+    "category": "comparative_follow_up"
+  },
+  {
+    "id": "fu_13",
+    "query": "why did the CEO resign abruptly",
+    "expected_intent": "follow_up",
+    "category": "corporate_causal"
+  },
+  {
+    "id": "fu_14",
+    "query": "tell me more about the environmental impact",
+    "expected_intent": "follow_up",
+    "history": [
+      {"role": "user", "text": "The highway project was approved today."},
+      {"role": "assistant", "text": "The project will cut travel time between the cities."}
+    ],
+    "category": "expansion_follow_up"
+  },
+  {
+    "id": "fu_15",
+    "query": "what are the terms of the settlement",
+    "expected_intent": "follow_up",
+    "history": [
+      {"role": "user", "text": "The antitrust dispute was settled out of court."},
+      {"role": "assistant", "text": "Both parties agreed to resolve the multi-year litigation."}
+    ],
+    "category": "details_follow_up"
+  },
+  {
+    "id": "ctx_01",
+    "query": "what is happening in the Indian parliament today",
+    "expected_intent": "context",
+    "category": "broad_situational_update"
+  },
+  {
+    "id": "ctx_02",
+    "query": "give me an update on the US presidential election",
+    "expected_intent": "context",
+    "category": "ongoing_event_overview"
+  },
+  {
+    "id": "ctx_03",
+    "query": "tell me about the current status of the Russia Ukraine war",
+    "expected_intent": "context",
+    "category": "conflict_overview"
+  },
+  {
+    "id": "ctx_04",
+    "query": "what are the major developments in Artificial Intelligence this week",
+    "expected_intent": "context",
+    "category": "technology_roundup"
+  },
+  {
+    "id": "ctx_05",
+    "query": "provide an overview of the global crude oil market",
+    "expected_intent": "context",
+    "category": "market_overview"
+  },
+  {
+    "id": "ctx_06",
+    "query": "what is the situation with monsoon rainfall across India",
+    "expected_intent": "context",
+    "category": "weather_situational"
+  },
+  {
+    "id": "ctx_07",
+    "query": "summarize the key highlights from the union budget",
+    "expected_intent": "context",
+    "category": "budget_synthesis"
+  },
+  {
+    "id": "ctx_08",
+    "query": "what is going on with the semiconductor chip supply chain",
+    "expected_intent": "context",
+    "category": "industry_overview"
+  },
+  {
+    "id": "ctx_09",
+    "query": "give me the background and history of the conflict in West Asia",
+    "expected_intent": "context",
+    "category": "historical_context"
+  },
+  {
+    "id": "ctx_10",
+    "query": "what are the latest trends in renewable energy adoption",
+    "expected_intent": "context",
+    "category": "trends_overview"
+  },
+  {
+    "id": "ctx_11",
+    "query": "tell me about the ongoing G20 summit proceedings",
+    "expected_intent": "context",
+    "category": "diplomatic_summit"
+  },
+  {
+    "id": "ctx_12",
+    "query": "what is happening with electric vehicle sales in India and globally",
+    "expected_intent": "context",
+    "category": "market_landscape"
+  },
+  {
+    "id": "ctx_13",
+    "query": "provide context on the Supreme Court's latest ruling on privacy",
+    "expected_intent": "context",
+    "category": "judicial_context"
+  },
+  {
+    "id": "ctx_14",
+    "query": "overview of the tech layoffs and hiring trends",
+    "expected_intent": "context",
+    "category": "employment_trends"
+  },
+  {
+    "id": "ctx_15",
+    "query": "what are the recent space exploration missions announced globally",
+    "expected_intent": "context",
+    "category": "space_missions_roundup"
+  }
+]

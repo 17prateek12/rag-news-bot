@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.redis_client import get_sync_redis
+from app.core.tracing import traceable
 from app.models.article import Article
 from app.models.trending import TrendingEntity, article_entities
 from app.models.watch import Watch
@@ -20,8 +21,44 @@ from app.schemas.article import NormalizedArticleDTO
 from app.services.email_service import EmailService
 from app.services.llm_service import llm_service
 from app.services.web_fallback_service import web_fallback_service
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+
+class DigestSummarySchema(BaseModel):
+    overview: str = Field(description="2-3 sentence executive summary")
+    bullets: list[str] = Field(default_factory=list, description="List of key factual update bullet points")
+
+
+def parse_digest_summary_langchain(raw_text: str) -> DigestSummarySchema:
+    """Parse digest raw LLM text into structured overview and bullets using LangChain PydanticOutputParser with fallback."""
+    try:
+        from langchain_core.output_parsers import PydanticOutputParser
+
+        parser = PydanticOutputParser(pydantic_object=DigestSummarySchema)
+        return parser.parse(raw_text)
+    except Exception as exc:
+        logger.debug("LangChain digest parser failed (%s), using rule-based parsing", exc)
+        lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+        overview_lines = []
+        bullets = []
+        in_bullets = False
+        for line in lines:
+            if line.lower().startswith("key updates:"):
+                in_bullets = True
+                continue
+            if in_bullets or line.startswith(("-", "*", "•")):
+                cleaned = line.lstrip("-*• ").strip()
+                if cleaned:
+                    bullets.append(cleaned)
+            else:
+                overview_lines.append(line)
+        return DigestSummarySchema(
+            overview=" ".join(overview_lines),
+            bullets=bullets,
+        )
+
 
 
 async def resolve_canonical_entity(
@@ -109,6 +146,7 @@ Key Updates:
 
 class DigestService:
     @classmethod
+    @traceable(name="daily_digests_run", run_type="chain")
     async def run_daily_digests(
         cls,
         digest_date: date | None = None,

@@ -5,6 +5,7 @@ import orjson
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.tracing import traceable
 from app.schemas.agent import RAGResponse, SourceCitation
 from app.schemas.intent import ChatTurn, IntentClassification, QueryIntent
 from app.services.cache_service import cache_service
@@ -13,7 +14,9 @@ from app.services.hybrid_search_service import HybridSearchService
 from app.services.intent_classifier import intent_classifier
 from app.services.llm_service import llm_service
 from app.services.prompt_templates import NO_HISTORY_FOLLOW_UP_NOTE, PROMPTS
+from app.services.query_rewriter import lcel_query_rewriter
 from app.services.reranker_service import reranker_service
+from app.services.shadow_harness import shadow_harness
 from app.services.web_fallback_service import web_fallback_service
 
 logger = logging.getLogger(__name__)
@@ -361,6 +364,9 @@ class RAGService:
         if not history:
             return query
 
+        if settings.use_langchain_query_rewriter:
+            return await lcel_query_rewriter.rewrite(query, history)
+
         history_text = "\n".join(f"{turn.role}: {turn.text}" for turn in history[-6:])
         prompt = f"""You are an expert search query rewriter for a news Q&A agent.
 Your task is to rewrite the user's latest query into a standalone, fully-qualified search query that resolves any pronouns, typos, or context from the recent conversation history.
@@ -388,7 +394,81 @@ Rewritten Query:"""
             logger.warning("Query rewriting failed: %s", exc)
         return query
 
+    @traceable(name="rag_service_query", run_type="chain")
     async def query(
+        self,
+        query: str,
+        *,
+        limit: int = 6,
+        history: list[ChatTurn] | None = None,
+        prior_sources: list[dict] | None = None,
+        track_trending: bool = True,
+    ) -> RAGResponse:
+        # Phase 4: Route directly via LangGraph StateGraph if flag is active
+        if settings.use_langgraph_router:
+            from app.services.rag_graph import execute_rag_graph
+            return await execute_rag_graph(
+                self,
+                query,
+                limit=limit,
+                history=history,
+                prior_sources=prior_sources,
+                track_trending=track_trending,
+            )
+
+        # Phase 0/4: Shadow Mode Harness if enabled
+        if settings.shadow_mode_enabled:
+            from app.services.rag_graph import execute_rag_graph
+
+            async def _baseline():
+                return await self._execute_baseline_query(
+                    query,
+                    limit=limit,
+                    history=history,
+                    prior_sources=prior_sources,
+                    track_trending=track_trending,
+                )
+
+            async def _shadow():
+                return await execute_rag_graph(
+                    self,
+                    query,
+                    limit=limit,
+                    history=history,
+                    prior_sources=prior_sources,
+                    track_trending=track_trending,
+                )
+
+            def _diff_fn(baseline: RAGResponse, shadow: RAGResponse, b_lat: float, s_lat: float) -> dict:
+                return {
+                    "query": query,
+                    "baseline_intent": baseline.intent.value if hasattr(baseline.intent, "value") else str(baseline.intent),
+                    "shadow_intent": shadow.intent.value if hasattr(shadow.intent, "value") else str(shadow.intent),
+                    "intent_match": baseline.intent == shadow.intent,
+                    "baseline_sources_count": len(baseline.sources),
+                    "shadow_sources_count": len(shadow.sources),
+                    "baseline_latency_ms": round(b_lat, 2),
+                    "shadow_latency_ms": round(s_lat, 2),
+                    "latency_delta_ms": round(s_lat - b_lat, 2),
+                }
+
+            return await shadow_harness.execute_with_shadow(
+                name="rag_langgraph_router",
+                baseline_fn=_baseline,
+                shadow_fn=_shadow,
+                diff_fn=_diff_fn,
+                enabled=True,
+            )
+
+        return await self._execute_baseline_query(
+            query,
+            limit=limit,
+            history=history,
+            prior_sources=prior_sources,
+            track_trending=track_trending,
+        )
+
+    async def _execute_baseline_query(
         self,
         query: str,
         *,

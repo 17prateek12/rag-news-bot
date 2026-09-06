@@ -2,6 +2,8 @@ import json
 import logging
 import re
 
+from app.config import settings
+from app.core.tracing import traceable
 from app.schemas.intent import ChatTurn, IntentClassification, QueryIntent
 from app.services.llm_service import llm_service
 
@@ -44,6 +46,7 @@ Respond with JSON only, no markdown:
 
 
 class IntentClassifier:
+    @traceable(name="intent_classification", run_type="chain")
     def classify(self, query: str, history: list[ChatTurn] | None = None) -> IntentClassification:
         history = history or []
         if history:
@@ -56,7 +59,12 @@ class IntentClassifier:
         logger.info("Classifying intent query=%r history_turns=%s", query, len(history))
 
         raw = llm_service.generate(prompt)
-        parsed = self._parse_response(raw, query=query, history=history)
+
+        if settings.use_langchain_output_parsing:
+            parsed = self._parse_with_langchain(raw, query=query, history=history)
+        else:
+            parsed = self._parse_response(raw, query=query, history=history)
+
         logger.info(
             "Intent classified intent=%s confidence=%s reason=%r",
             parsed.intent,
@@ -64,6 +72,22 @@ class IntentClassifier:
             parsed.reason,
         )
         return parsed
+
+    def _parse_with_langchain(
+        self,
+        raw: str,
+        *,
+        query: str,
+        history: list[ChatTurn],
+    ) -> IntentClassification:
+        try:
+            from langchain_core.output_parsers import PydanticOutputParser
+
+            parser = PydanticOutputParser(pydantic_object=IntentClassification)
+            return parser.parse(raw)
+        except Exception as exc:
+            logger.warning("LangChain PydanticOutputParser failed (%s), falling back to regex parser", exc)
+            return self._parse_response(raw, query=query, history=history)
 
     def _parse_response(
         self,
