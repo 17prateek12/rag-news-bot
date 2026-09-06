@@ -55,6 +55,10 @@ def decode_user_token(token: str) -> dict:
     return payload
 
 
+def _password_reset_secret() -> str:
+    return settings.password_reset_secret or settings.jwt_secret
+
+
 def create_password_reset_token(email: str, expire_minutes: int = 15) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=expire_minutes)
     payload = {
@@ -62,11 +66,11 @@ def create_password_reset_token(email: str, expire_minutes: int = 15) -> str:
         "token_type": PASSWORD_RESET_TOKEN_TYPE,
         "exp": expire,
     }
-    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    return jwt.encode(payload, _password_reset_secret(), algorithm=settings.jwt_algorithm)
 
 
 def decode_password_reset_token(token: str) -> dict:
-    payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    payload = jwt.decode(token, _password_reset_secret(), algorithms=[settings.jwt_algorithm])
     if payload.get("token_type") != PASSWORD_RESET_TOKEN_TYPE:
         raise JWTError("Invalid token type")
     return payload

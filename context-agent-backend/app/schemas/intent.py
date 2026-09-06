@@ -12,7 +12,7 @@ class QueryIntent(StrEnum):
 
 class ChatTurn(BaseModel):
     role: Literal["user", "assistant"]
-    text: str = Field(min_length=1, max_length=4000)
+    text: str = Field(min_length=1, max_length=50000)
 
 
 class IntentClassification(BaseModel):

@@ -24,6 +24,7 @@ from app.api.routes.speech import router as speech_router
 from app.api.routes.trending import router as trending_router
 from app.api.routes.watches import router as watches_router
 from app.api.routes.ws import router as ws_router, redis_updates_listener
+from app.config import settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging_config import setup_logging
 from app.core.request_logging import RequestLoggingMiddleware
@@ -54,11 +55,16 @@ app = FastAPI(
 
 register_exception_handlers(app)
 
+cors_origins = [settings.frontend_url] if settings.frontend_url else []
+for dev_origin in ("http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"):
+    if dev_origin not in cors_origins:
+        cors_origins.append(dev_origin)
+
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=cors_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

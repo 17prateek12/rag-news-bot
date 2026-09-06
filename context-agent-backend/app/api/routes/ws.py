@@ -45,6 +45,22 @@ manager = ConnectionManager()
 
 @router.websocket("/news")
 async def websocket_news_endpoint(websocket: WebSocket):
+    # Authenticate via httpOnly cookie or query token
+    token = websocket.cookies.get("access_token")
+    if not token:
+        token = websocket.query_params.get("token")
+
+    if not token:
+        await websocket.close(code=1008)
+        return
+
+    try:
+        from app.core.security import decode_user_token
+        decode_user_token(token)
+    except Exception:
+        await websocket.close(code=1008)
+        return
+
     await manager.connect(websocket)
     try:
         while True:

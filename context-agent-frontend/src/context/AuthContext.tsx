@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { api, getToken, setToken } from '../api/client'
+import { api } from '../api/client'
 import type { User } from '../api/types'
 
 export type AuthMode =
@@ -25,7 +25,7 @@ interface AuthContextValue {
   changePassword: (current_password: string, new_password: string) => Promise<string>
   forgotPassword: (email: string) => Promise<string>
   resetPassword: (token: string, new_password: string) => Promise<string>
-  logout: () => void
+  logout: () => Promise<void>
   openAuth: (mode?: AuthMode) => void
   closeAuth: () => void
   authOpen: boolean
@@ -41,16 +41,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authMode, setAuthMode] = useState<AuthMode>('login')
 
   const refreshUser = useCallback(async () => {
-    if (!getToken()) {
-      setUser(null)
-      setLoading(false)
-      return
-    }
     try {
       const me = await api.me()
       setUser(me)
     } catch {
-      setToken(null)
       setUser(null)
     } finally {
       setLoading(false)
@@ -62,17 +56,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshUser])
 
   const login = async (email: string, password: string) => {
-    const res = await api.login(email, password)
-    setToken(res.access_token)
-    const me = await api.me()
+    const me = await api.login(email, password)
     setUser(me)
     setAuthOpen(false)
   }
 
   const register = async (email: string, password: string) => {
-    const res = await api.register(email, password)
-    setToken(res.access_token)
-    const me = await api.me()
+    const me = await api.register(email, password)
     setUser(me)
     setAuthOpen(false)
   }
@@ -92,9 +82,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return res.message
   }
 
-  const logout = () => {
-    setToken(null)
-    setUser(null)
+  const logout = async () => {
+    try {
+      await api.logout()
+    } catch {
+      // ignore
+    } finally {
+      setUser(null)
+    }
   }
 
   const value = useMemo(

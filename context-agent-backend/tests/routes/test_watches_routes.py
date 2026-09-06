@@ -163,3 +163,31 @@ class TestWatchesRoutes(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["digests_created"], 3)
         mock_service.run_daily_digests.assert_called_once()
+
+    @patch("app.api.routes.watches.check_watch_update_rate_limit")
+    @patch("app.api.routes.watches.WatchRepository")
+    def test_create_watch_rate_limit_exceeded(self, mock_repo_cls, mock_rate_limit):
+        from fastapi import HTTPException
+        mock_rate_limit.side_effect = HTTPException(status_code=429, detail="Rate limit exceeded")
+
+        response = self.client.post("/watches", json={"keyword": "ISRO"})
+        self.assertEqual(response.status_code, 429)
+
+    @patch("app.core.rate_limit.get_sync_redis")
+    def test_check_watch_update_rate_limit_helper(self, mock_get_redis):
+        from app.core.rate_limit import check_watch_update_rate_limit
+        from fastapi import HTTPException
+
+        mock_redis = MagicMock()
+        mock_redis.incr.return_value = 1
+        mock_get_redis.return_value = mock_redis
+
+        # Under limit (1st attempt) -> sets TTL 86400
+        check_watch_update_rate_limit(self.user.id)
+        mock_redis.expire.assert_called_once_with(f"rate_limit:watch_update:{self.user.id}", 86400)
+
+        # Over limit (6th attempt) -> raises 429
+        mock_redis.incr.return_value = 6
+        with self.assertRaises(HTTPException) as ctx:
+            check_watch_update_rate_limit(self.user.id)
+        self.assertEqual(ctx.exception.status_code, 429)

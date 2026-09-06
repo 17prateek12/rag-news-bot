@@ -9,7 +9,7 @@ export function DigestPanel() {
 
   const { data: digests = [], isLoading } = useQuery({
     queryKey: ['digests'],
-    queryFn: () => api.listDigests(7),
+    queryFn: () => api.listDigests(),
     enabled: !!user,
   })
 

@@ -532,6 +532,52 @@ Rewritten Query:"""
             loop = asyncio.get_running_loop()
             answer = await loop.run_in_executor(None, llm_service.generate, prompt)
 
+            # Reactive web fallback: if local articles lacked the specific answer, fetch live web sources and regenerate
+            ungrounded_indicators = (
+                "provided excerpts do not",
+                "provided context does not",
+                "provided text does not",
+                "excerpts do not contain",
+                "excerpts do not name",
+                "excerpts do not mention",
+                "excerpts do not provide",
+                "excerpts do not state",
+                "context does not contain",
+                "context does not name",
+                "context does not mention",
+                "context does not provide",
+                "context does not state",
+                "do not name",
+                "does not name",
+                "do not mention",
+                "does not mention",
+            )
+            lower_ans = answer.lower()
+            if (
+                not retrieval.get("web_fallback_used")
+                and web_fallback_service.is_enabled()
+                and any(ind in lower_ans for ind in ungrounded_indicators)
+            ):
+                logger.info("Local excerpts insufficient for query %r. Triggering reactive web fallback.", query)
+                web_hits = await asyncio.to_thread(
+                    web_fallback_service.search,
+                    query,
+                    settings.web_fallback_max_results,
+                )
+                if web_hits:
+                    hits = merge_hits(web_hits, hits, max_total=max(limit, len(hits) + len(web_hits)))
+                    for hit in hits:
+                        if "source_type" not in hit:
+                            hit["source_type"] = classify_source_type(hit.get("url"), hit.get("source"))
+                    hits, rerank_meta = await self._apply_rerank(query, hits, max(limit, 4))
+                    retrieval["web_fallback_used"] = True
+                    retrieval["web_fallback_reason"] = "insufficient_local_context"
+                    retrieval["web_fallback_count"] = len(web_hits)
+                    retrieval.update(rerank_meta)
+
+                    prompt = self._build_prompt(query, hits, classification, history)
+                    answer = await loop.run_in_executor(None, llm_service.generate, prompt)
+
             sections = (
                 parse_context_sections(answer)
                 if classification.intent == QueryIntent.CONTEXT

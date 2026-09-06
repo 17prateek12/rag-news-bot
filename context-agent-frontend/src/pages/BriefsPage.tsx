@@ -9,7 +9,7 @@ import type { Digest } from '../api/types'
 
 export function BriefsPage() {
   const { user, openAuth } = useAuth()
-  const { digests, isLoading } = useDigests(14)
+  const { digests, isLoading } = useDigests()
   const [selectedBrief, setSelectedBrief] = useState<Digest | null>(null)
 
   if (!user) {

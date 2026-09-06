@@ -10,21 +10,55 @@ export function BriefDetailModal({ digest, onClose }: BriefDetailModalProps) {
   if (!digest) return null
 
   // Render formatted summary with full detail
-  const renderFullSummary = (text: string) => {
-    const lines = text.split('\n').filter((l) => l.trim().length > 0)
+  const renderFullSummary = (digest: Digest) => {
+    if (digest.overview || (digest.bullets && digest.bullets.length > 0)) {
+      return (
+        <>
+          {digest.overview && <p className="digest-modal-paragraph">{digest.overview}</p>}
+          {digest.bullets && digest.bullets.length > 0 && (
+            <>
+              <h4 className="digest-modal-section-title">Key Updates & Findings</h4>
+              <ul className="digest-modal-bullets-list">
+                {digest.bullets.map((bullet, idx) => (
+                  <li key={idx} className="digest-modal-bullet">
+                    {bullet}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </>
+      )
+    }
+
+    const text = digest.summary_text || ''
+    const lines = text.split('\n').map((l) => l.trim()).filter((l) => l.length > 0)
+    const headerPatterns = [
+      'key updates',
+      'key findings',
+      'key takeaways',
+      'key developments',
+      'highlights',
+      'bullet points',
+      'updates:',
+      'summary:',
+    ]
+
     return lines.map((line, idx) => {
-      if (line.startsWith('- ') || line.startsWith('* ')) {
-        return (
-          <li key={idx} className="digest-modal-bullet">
-            {line.substring(2)}
-          </li>
-        )
-      }
-      if (line.toLowerCase().startsWith('key updates:')) {
+      const lower = line.toLowerCase()
+      if (headerPatterns.some((hp) => lower.startsWith(hp))) {
         return (
           <h4 key={idx} className="digest-modal-section-title">
             Key Updates & Findings
           </h4>
+        )
+      }
+      const bulletMatch = line.match(/^(?:[-*•]|\d+[\.\)])\s*(.+)$/)
+      if (bulletMatch) {
+        return (
+          <li key={idx} className="digest-modal-bullet">
+            {bulletMatch[1].trim()}
+          </li>
         )
       }
       return (
@@ -64,7 +98,7 @@ export function BriefDetailModal({ digest, onClose }: BriefDetailModalProps) {
         {/* Modal Body */}
         <div className="digest-modal-body">
           <div className="digest-modal-summary">
-            {renderFullSummary(digest.summary_text)}
+            {renderFullSummary(digest)}
           </div>
 
           {digest.articles && digest.articles.length > 0 && (

@@ -1,3 +1,5 @@
+import secrets
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
 from jose import JWTError
@@ -27,7 +29,7 @@ async def get_current_admin(
 
     repo = AdminRepository(db)
 
-    if api_key and settings.admin_api_key and api_key == settings.admin_api_key:
+    if api_key and settings.admin_api_key and secrets.compare_digest(api_key, settings.admin_api_key):
         admin = await repo.get_singleton()
         if admin:
             return admin

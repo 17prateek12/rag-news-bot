@@ -120,6 +120,9 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_algorithm: str
     jwt_expire_minutes: int
+    # Optional separate secret for password-reset tokens.
+    # If not set, falls back to jwt_secret at runtime.
+    password_reset_secret: str = ""
 
     @property
     def effective_from_email(self) -> str:

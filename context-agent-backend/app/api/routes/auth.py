@@ -1,5 +1,5 @@
 from jose import JWTError
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -23,15 +23,32 @@ from app.schemas.user import (
     UserLoginRequest,
     UserRead,
     UserRegisterRequest,
-    UserTokenResponse,
 )
 from app.services.email_service import EmailService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+_COOKIE_MAX_AGE = settings.jwt_expire_minutes * 60
+_COOKIE_SECURE = settings.environment.lower() == "production"
+_COOKIE_SAMESITE = "none" if _COOKIE_SECURE else "lax"
 
-@router.post("/register", response_model=UserTokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(payload: UserRegisterRequest, db: AsyncSession = Depends(get_db)):
+
+def _set_auth_cookie(response: Response, token: str) -> None:
+    """Write the JWT as an httpOnly cookie."""
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        max_age=_COOKIE_MAX_AGE,
+        samesite=_COOKIE_SAMESITE,
+        secure=_COOKIE_SECURE,
+        path="/",
+    )
+
+
+@router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(rate_limit_login)])
+async def register(payload: UserRegisterRequest, response: Response, db: AsyncSession = Depends(get_db)):
     repo = UserRepository(db)
     existing = await repo.get_by_email(payload.email)
     if existing:
@@ -39,17 +56,30 @@ async def register(payload: UserRegisterRequest, db: AsyncSession = Depends(get_
 
     user = await repo.create(payload.email, hash_password(payload.password))
     token = create_user_token(email=user.email)
-    return UserTokenResponse(access_token=token)
+    _set_auth_cookie(response, token)
+    return UserRead(id=str(user.id), email=user.email)
 
 
-@router.post("/login", response_model=UserTokenResponse, dependencies=[Depends(rate_limit_login)])
-async def login(payload: UserLoginRequest, db: AsyncSession = Depends(get_db)):
+@router.post("/login", response_model=UserRead, dependencies=[Depends(rate_limit_login)])
+async def login(payload: UserLoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
     repo = UserRepository(db)
     user = await repo.get_by_email(payload.email)
     if not user or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     token = create_user_token(email=user.email)
-    return UserTokenResponse(access_token=token)
+    _set_auth_cookie(response, token)
+    return UserRead(id=str(user.id), email=user.email)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(response: Response) -> None:
+    """Clear the auth cookie."""
+    response.delete_cookie(
+        key="access_token",
+        path="/",
+        samesite=_COOKIE_SAMESITE,
+        secure=_COOKIE_SECURE,
+    )
 
 
 @router.get("/me", response_model=UserRead)
@@ -126,8 +156,8 @@ async def reset_password(
     user = await repo.get_by_email(email)
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User associated with this reset token was not found.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired password reset token.",
         )
 
     new_hashed = hash_password(payload.new_password)

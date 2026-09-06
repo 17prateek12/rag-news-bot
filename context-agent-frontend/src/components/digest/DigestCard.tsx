@@ -22,14 +22,49 @@ export function DigestCard({ digest, isSpotlight = false, onOpenModal }: DigestC
 
   // Parse text into executive paragraph and bullet points
   const parseSummaryContent = (text: string) => {
-    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
+    if (!text) return { paragraph: '', bullets: [] }
+    const trimmed = text.trim()
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const data = JSON.parse(trimmed)
+        return {
+          paragraph: data.overview || data.summary || '',
+          bullets: Array.isArray(data.bullets) ? data.bullets : [],
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    const lines = trimmed.split('\n').map((l) => l.trim()).filter(Boolean)
     const paragraphs: string[] = []
     const bullets: string[] = []
+    let inBullets = false
+
+    const headerPatterns = [
+      'key updates',
+      'key findings',
+      'key takeaways',
+      'key developments',
+      'highlights',
+      'bullet points',
+      'updates:',
+      'summary:',
+    ]
 
     for (const line of lines) {
-      if (line.startsWith('- ') || line.startsWith('* ')) {
-        bullets.push(line.substring(2))
-      } else if (!line.toLowerCase().startsWith('key updates:')) {
+      const lower = line.toLowerCase()
+      if (headerPatterns.some((hp) => lower.startsWith(hp))) {
+        inBullets = true
+        continue
+      }
+      const bulletMatch = line.match(/^(?:[-*•]|\d+[\.\)])\s*(.+)$/)
+      if (bulletMatch) {
+        inBullets = true
+        bullets.push(bulletMatch[1].trim())
+      } else if (inBullets) {
+        bullets.push(line.replace(/^[-*•\s]+/, '').trim())
+      } else {
         paragraphs.push(line)
       }
     }
@@ -40,7 +75,9 @@ export function DigestCard({ digest, isSpotlight = false, onOpenModal }: DigestC
     }
   }
 
-  const { paragraph, bullets } = parseSummaryContent(digest.summary_text)
+  const fallback = parseSummaryContent(digest.summary_text)
+  const paragraph = digest.overview || fallback.paragraph
+  const bullets = (digest.bullets && digest.bullets.length > 0) ? digest.bullets : fallback.bullets
   const visibleSources = digest.articles ? digest.articles.slice(0, 2) : []
   const remainingSourcesCount = digest.articles ? Math.max(0, digest.articles.length - 2) : 0
 
@@ -64,7 +101,7 @@ export function DigestCard({ digest, isSpotlight = false, onOpenModal }: DigestC
             <div className="compact-bullets-box">
               <span className="compact-bullets-label">Key Highlights:</span>
               <ul className="compact-bullets-list">
-                {bullets.slice(0, 2).map((bullet, idx) => (
+                {bullets.slice(0, 2).map((bullet: string, idx: number) => (
                   <li key={idx} className="compact-bullet-item">
                     {bullet}
                   </li>

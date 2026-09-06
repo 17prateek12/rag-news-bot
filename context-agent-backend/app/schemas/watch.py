@@ -45,6 +45,8 @@ class DigestRead(BaseModel):
     keyword: str
     digest_date: date
     summary_text: str
+    overview: str = ""
+    bullets: list[str] = Field(default_factory=list)
     article_ids: list[UUID]
     articles: list[DigestArticleRead] = []
     created_at: datetime

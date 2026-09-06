@@ -139,6 +139,8 @@ export interface Digest {
   keyword: string
   digest_date: string
   summary_text: string
+  overview?: string
+  bullets?: string[]
   article_ids: string[]
   articles: DigestArticle[]
   created_at: string

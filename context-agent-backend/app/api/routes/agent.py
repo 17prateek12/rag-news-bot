@@ -5,6 +5,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.user_auth import get_current_user
+from app.models.user import User
 from app.schemas.agent import ClassifyQueryResponse, RAGQueryRequest, RAGResponse
 from app.schemas.intent import ChatTurn
 from app.services.rag_service import RAGService
@@ -17,9 +19,10 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 @router.post("/query", response_model=RAGResponse)
 async def agent_query(
     payload: RAGQueryRequest,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    logger.info("Agent query query=%r intent_history=%s", payload.query, len(payload.history))
+    logger.info("Agent query user_id=%s query=%r intent_history=%s", current_user.id, payload.query, len(payload.history))
     service = RAGService(db)
     return await service.query(
         payload.query,
@@ -31,9 +34,10 @@ async def agent_query(
 @router.post("/query/stream")
 async def agent_query_stream(
     payload: RAGQueryRequest,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    logger.info("Agent query stream query=%r intent_history=%s", payload.query, len(payload.history))
+    logger.info("Agent query stream user_id=%s query=%r intent_history=%s", current_user.id, payload.query, len(payload.history))
     service = RAGService(db)
     return StreamingResponse(
         service.query_stream(
@@ -48,6 +52,7 @@ async def agent_query_stream(
 @router.get("/classify", response_model=ClassifyQueryResponse)
 async def classify_query(
     q: str = Query(min_length=1),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Debug endpoint: classify intent without retrieval or generation."""

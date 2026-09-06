@@ -38,7 +38,10 @@ class ChatService:
         for message in messages[-MAX_HISTORY_TURNS:]:
             if message.role not in ("user", "assistant"):
                 continue
-            history.append(ChatTurn(role=message.role, text=message.text))
+            text = (message.text or "").strip()
+            if not text:
+                continue
+            history.append(ChatTurn(role=message.role, text=text[:50000]))
         return history
 
     def _sources_snapshot(self, sources: list) -> list[dict]:

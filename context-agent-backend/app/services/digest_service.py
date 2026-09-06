@@ -31,6 +31,73 @@ class DigestSummarySchema(BaseModel):
     bullets: list[str] = Field(default_factory=list, description="List of key factual update bullet points")
 
 
+def _parse_digest_summary_rules(raw_text: str) -> DigestSummarySchema:
+    import json
+    import re
+
+    if not raw_text or not raw_text.strip():
+        return DigestSummarySchema(overview="", bullets=[])
+
+    raw_text = raw_text.strip()
+
+    # 1. Try JSON parse
+    if (raw_text.startswith("{") and raw_text.endswith("}")) or ("```json" in raw_text):
+        cleaned_json = raw_text
+        if "```json" in raw_text:
+            match = re.search(r"```json\s*(\{.*?\})\s*```", raw_text, re.DOTALL)
+            if match:
+                cleaned_json = match.group(1)
+        try:
+            data = json.loads(cleaned_json)
+            if isinstance(data, dict):
+                overview = str(data.get("overview") or data.get("summary") or "").strip()
+                bullets_raw = data.get("bullets") or data.get("key_updates") or data.get("highlights") or []
+                bullets = [str(b).strip() for b in bullets_raw if str(b).strip()]
+                if overview or bullets:
+                    return DigestSummarySchema(overview=overview, bullets=bullets)
+        except Exception:
+            pass
+
+    # 2. Rule-based line-by-line parsing
+    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    overview_lines = []
+    bullets = []
+    in_bullets = False
+
+    header_patterns = (
+        "key updates",
+        "key findings",
+        "key takeaways",
+        "key developments",
+        "highlights",
+        "bullet points",
+        "updates:",
+        "summary:",
+    )
+
+    bullet_regex = re.compile(r"^(?:[-*•]|\d+[\.\)])\s*(.+)$")
+
+    for line in lines:
+        lower_line = line.lower()
+        if any(lower_line.startswith(hp) for hp in header_patterns):
+            in_bullets = True
+            continue
+
+        match = bullet_regex.match(line)
+        if match:
+            in_bullets = True
+            bullets.append(match.group(1).strip())
+        elif in_bullets:
+            cleaned = line.lstrip("-*• ").strip()
+            if cleaned:
+                bullets.append(cleaned)
+        else:
+            overview_lines.append(line)
+
+    overview = " ".join(overview_lines).strip()
+    return DigestSummarySchema(overview=overview, bullets=bullets)
+
+
 def parse_digest_summary_langchain(raw_text: str) -> DigestSummarySchema:
     """Parse digest raw LLM text into structured overview and bullets using LangChain PydanticOutputParser with fallback."""
     try:
@@ -40,24 +107,14 @@ def parse_digest_summary_langchain(raw_text: str) -> DigestSummarySchema:
         return parser.parse(raw_text)
     except Exception as exc:
         logger.debug("LangChain digest parser failed (%s), using rule-based parsing", exc)
-        lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-        overview_lines = []
-        bullets = []
-        in_bullets = False
-        for line in lines:
-            if line.lower().startswith("key updates:"):
-                in_bullets = True
-                continue
-            if in_bullets or line.startswith(("-", "*", "•")):
-                cleaned = line.lstrip("-*• ").strip()
-                if cleaned:
-                    bullets.append(cleaned)
-            else:
-                overview_lines.append(line)
-        return DigestSummarySchema(
-            overview=" ".join(overview_lines),
-            bullets=bullets,
-        )
+        return _parse_digest_summary_rules(raw_text)
+
+
+def parse_digest_summary(raw_text: str) -> DigestSummarySchema:
+    """Parse digest raw LLM text into structured overview and bullets."""
+    if settings.use_langchain_output_parsing:
+        return parse_digest_summary_langchain(raw_text)
+    return _parse_digest_summary_rules(raw_text)
 
 
 
@@ -92,15 +149,17 @@ async def find_matching_articles(
             article_entities, Article.id == article_entities.c.article_id
         ).where(article_entities.c.entity_id == entity_id)
     else:
-        # Note: ILIKE pattern matching on title/cleaned_text is suitable for portfolio
-        # and moderate news corpus scale. At high scale (millions of articles), a pg_trgm
-        # or dedicated full-text search GIN index on cleaned_text should be added.
-        clean_kw = keyword.strip()
-        pattern = f"%{clean_kw}%"
+        escaped_kw = (
+            keyword.strip()
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        pattern = f"%{escaped_kw}%"
         stmt = stmt.where(
             or_(
-                Article.title.ilike(pattern),
-                Article.cleaned_text.ilike(pattern),
+                Article.title.ilike(pattern, escape="\\"),
+                Article.cleaned_text.ilike(pattern, escape="\\"),
             )
         )
 
@@ -225,17 +284,14 @@ class DigestService:
 
                 for (kw_lower, entity_id), watches in keyword_groups.items():
                     canonical_keyword = watches[0].keyword
+                    watch_ids = [w.id for w in watches]
 
-                    # Check if all watches in this group already have digests for target_date
-                    pending_watches = []
-                    for w in watches:
-                        existing = await digest_repo.get_by_watch_and_date(
-                            w.id, target_date
-                        )
-                        if existing:
-                            digests_skipped += 1
-                        else:
-                            pending_watches.append(w)
+                    # Batch check if watches in this group already have digests for target_date
+                    existing_watch_ids = await digest_repo.get_existing_watch_ids_for_date(
+                        watch_ids, target_date
+                    )
+                    pending_watches = [w for w in watches if w.id not in existing_watch_ids]
+                    digests_skipped += len(existing_watch_ids)
 
                     if not pending_watches:
                         logger.debug(
@@ -317,19 +373,14 @@ class DigestService:
                         )
                         continue
 
-                    # 4. Persist digest records across all users watching this topic
-                    for w in pending_watches:
-                        _, created = await digest_repo.create_or_skip(
-                            user_id=w.user_id,
-                            watch_id=w.id,
-                            digest_date=target_date,
-                            summary_text=summary_text,
-                            article_ids=article_ids,
-                        )
-                        if created:
-                            digests_created += 1
-                        else:
-                            digests_skipped += 1
+                    # 4. Batch persist digest records across all users watching this topic
+                    count = await digest_repo.create_batch_for_watches(
+                        pending_watches,
+                        digest_date=target_date,
+                        summary_text=summary_text,
+                        article_ids=article_ids,
+                    )
+                    digests_created += count
 
                 # 5. Send email notification to each user who has subscribed topics
                 if digests_created > 0 and user_subscribed_topics:

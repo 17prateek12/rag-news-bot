@@ -135,6 +135,52 @@ async def generate_node(state: RAGGraphState) -> dict:
         loop = asyncio.get_running_loop()
         answer = await loop.run_in_executor(None, llm_service.generate, prompt)
 
+        # Reactive web fallback: if local articles lacked the specific answer, fetch live web sources and regenerate
+        ungrounded_indicators = (
+            "provided excerpts do not",
+            "provided context does not",
+            "provided text does not",
+            "excerpts do not contain",
+            "excerpts do not name",
+            "excerpts do not mention",
+            "excerpts do not provide",
+            "excerpts do not state",
+            "context does not contain",
+            "context does not name",
+            "context does not mention",
+            "context does not provide",
+            "context does not state",
+            "do not name",
+            "does not name",
+            "do not mention",
+            "does not mention",
+        )
+        lower_ans = answer.lower()
+        from app.services.web_fallback_service import web_fallback_service
+        from app.config import settings
+        from app.services.context_synthesis import merge_hits
+        if (
+            not retrieval.get("web_fallback_used")
+            and web_fallback_service.is_enabled()
+            and any(ind in lower_ans for ind in ungrounded_indicators)
+        ):
+            logger.info("LangGraph [generate_node] Local excerpts insufficient for %r. Triggering reactive web fallback.", query)
+            web_hits = await asyncio.to_thread(
+                web_fallback_service.search,
+                query,
+                settings.web_fallback_max_results,
+            )
+            if web_hits:
+                hits = merge_hits(web_hits, hits, max_total=max(limit, len(hits) + len(web_hits)))
+                hits, rerank_meta = await rag_service._apply_rerank(query, hits, max(limit, 4))
+                retrieval["web_fallback_used"] = True
+                retrieval["web_fallback_reason"] = "insufficient_local_context"
+                retrieval["web_fallback_count"] = len(web_hits)
+                retrieval.update(rerank_meta)
+
+                prompt = rag_service._build_prompt(query, hits, classification, history)
+                answer = await loop.run_in_executor(None, llm_service.generate, prompt)
+
         sections = (
             parse_context_sections(answer)
             if classification.intent == QueryIntent.CONTEXT
@@ -248,12 +294,28 @@ async def execute_rag_graph(
     track_trending: bool = True,
 ) -> RAGResponse:
     """Execute the compiled LangGraph StateGraph pipeline returning an exact RAGResponse."""
+    history = history or []
+
+    if not history:
+        cached_response = await asyncio.to_thread(cache_service.get_rag_response, query, limit)
+        if cached_response is not None:
+            logger.info("Serving LangGraph RAG response from cache query=%r", query)
+            cached_response.setdefault("retrieval", {})["from_cache"] = True
+            response = RAGResponse(**cached_response)
+            if track_trending and response.sources:
+                try:
+                    from app.worker.tasks import track_query_trending
+                    track_query_trending.delay(query)
+                except Exception as entity_exc:
+                    logger.exception("Failed to enqueue query trending from cache: %s", entity_exc)
+            return response
+
     graph = get_rag_graph()
     initial_state: RAGGraphState = {
         "rag_service": rag_service,
         "query": query,
         "limit": limit,
-        "history": history or [],
+        "history": history,
         "prior_sources": prior_sources or [],
         "track_trending": track_trending,
     }
